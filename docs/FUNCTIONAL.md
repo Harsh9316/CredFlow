@@ -1,0 +1,329 @@
+# CredFlow — Functional Specification
+
+## 1. Overview
+
+**CredFlow** is a B2B SaaS platform for NBFC credit underwriting and SME lending decisioning. It provides system-assisted underwriting with analyst control — standardizing analysis, improving speed, and strengthening auditability.
+
+> *CredFlow does not replace NBFC credit policy. It standardizes analysis, improves speed, and strengthens auditability.*
+
+### Key Capabilities
+- System-assisted underwriting with full analyst control at every step
+- Fraud / credit risk separation (fraud = reject, credit = price)
+- Cash-flow based underwriting with collateral-aware loan sizing
+- Bureau overlay as negative filter (absence ≠ rejection)
+- Multi-step loan application origination (LOS-Lite)
+- RBI-compliant approval workflows with mandatory audit trail
+- Portfolio-level risk governance and concentration monitoring
+- Role-based access control for team management
+
+### Out of Scope (v1)
+
+| Excluded from v1 | Rationale |
+|---|---|
+| Loan disbursement & repayment processing | Operational banking — separate system |
+| Collections & recovery workflows | Post-default processes |
+| Legal documentation generation | Requires legal template engine |
+| Asset valuation & charge registration | Field verification dependency |
+| Borrower-facing portals | B2C layer — not core underwriting |
+
+---
+
+## 2. User Roles
+
+| Role | Description | Capabilities |
+|------|-------------|-------------|
+| **NBFC Admin** | Organization administrator | Full system access, settings management, user oversight |
+| **Credit Analyst** | Underwriting officer | Create applications, run engine, approve/reject loans |
+| **Viewer** | Read-only stakeholder | View dashboards, applications, portfolio (no actions) |
+
+---
+
+## 3. Modules & Features
+
+### 3.1 Authentication & Login
+
+**Purpose**: Secure access to the platform with role-based permissions.
+
+| Feature | Description |
+|---------|-------------|
+| Login form | Email + password authentication |
+| Session management | Server-side secure cookie-based sessions |
+| Role enforcement | Actions restricted based on user role |
+| Demo credentials | Pre-seeded accounts for testing |
+
+---
+
+### 3.2 Dashboard
+
+**Purpose**: Real-time overview of lending operations.
+
+| Widget | Data Shown |
+|--------|-----------|
+| Total Applications | Count of all loan applications |
+| Approved / Sanctioned | Count + approval rate percentage |
+| Under Review | Pending applications + average TAT |
+| Rejected | Count of rejected applications |
+| Recent Applications | Last 10 applications with status, borrower, amount |
+
+**Actions**: Navigate to application detail, create new application.
+
+---
+
+### 3.3 New Loan Application (LOS-Lite)
+
+**Purpose**: Multi-step wizard for creating a new SME loan application.
+
+#### Step 1: Borrower Profile
+| Field | Type | Required |
+|-------|------|----------|
+| Business Name | Text | ✓ |
+| Legal Name | Text | |
+| Industry | Dropdown (14 industries) | ✓ |
+| Constitution | Dropdown (5 types) | ✓ |
+| PAN | Text (10 char) | |
+| GSTIN | Text (15 char) | |
+| Business Vintage | Number (months) | ✓ |
+| Annual Turnover | Currency (₹) | |
+| Contact Person | Text | ✓ |
+| Contact Phone | Text | ✓ |
+| City / State | Text | |
+
+#### Step 2: Loan Details
+| Field | Type | Required |
+|-------|------|----------|
+| Requested Amount | Currency (₹) | ✓ |
+| Requested Tenure | Number (months) | ✓ |
+| Purpose | Text | |
+| Priority | Dropdown (Low/Normal/High/Urgent) | |
+
+#### Step 3: Financial Information
+| Field | Type | Required |
+|-------|------|----------|
+| Avg Monthly Inflow | Currency (₹) | ✓ |
+| Avg Monthly Expenses | Currency (₹) | ✓ |
+| Inflow Volatility (CV) | Decimal | |
+| Free Cash Flow | Auto-calculated | — |
+
+#### Step 4: Security & Collateral
+| Field | Type | Required |
+|-------|------|----------|
+| Collateral Type | Dropdown (6 types) | |
+| Assessed Value | Currency (₹) | If secured |
+| LTV (%) | Number | If secured |
+| Personal Guarantee | Checkbox | |
+| Guarantor Name | Text | If PG checked |
+
+**Output**: Application created with auto-generated application number (e.g., `FFC-2026-0010`), redirect to application detail page.
+
+---
+
+### 3.4 Application Detail & Underwriting Flow
+
+**Purpose**: Comprehensive view of a single application with full underwriting pipeline.
+
+#### Information Sections
+| Section | Content |
+|---------|---------|
+| Borrower Profile | Legal name, constitution, industry, vintage, GSTIN, turnover, contact |
+| Loan Request | Amount, tenure, purpose, source platform |
+| Financial Analysis | Monthly inflow/outflow/FCF, volatility chart, monthly cash flow bars |
+| Collateral & Security | Type, assessed value, LTV, collateral cap, guarantor |
+
+#### 3-Stage Underwriting Pipeline
+
+**Stage 1: Fraud Pre-Checks** (runs automatically when engine triggered)
+
+| Check | Signal | Severity |
+|-------|--------|----------|
+| PAN/GSTIN mismatch | Identity fraud | CRITICAL |
+| No PAN + no GSTIN | Unverifiable entity | WARNING |
+| Inflow >2.5x average in any month | Round-tripping / window dressing | WARNING |
+| Bank inflow <30% of declared turnover | Inflated financials | CRITICAL |
+| Vintage <6 mo + loan >₹25L | Shell entity risk | WARNING |
+| Loan amount > annual turnover | Capacity concern | WARNING |
+
+*Fraud signals are displayed in a dedicated "Fraud Pre-Checks" card with CLEAR / REVIEW / HIGH_RISK status.*
+*Fraud signals are advisory to the analyst except HIGH_RISK flags, which enforce a system-level rejection recommendation.*
+*HIGH_RISK = automatic rejection override. REVIEW = analyst awareness flag.*
+
+**Stage 2: Bureau Overlay** (optional, negative filter)
+
+> Bureau score is used as a **negative filter only**. Absence of bureau data does NOT imply rejection. Cash-flow based underwriting remains primary.
+
+| Scenario | Effect |
+|----------|--------|
+| Bureau not available | No impact — proceed with cash-flow assessment |
+| Score ≥ 750 | +5 modifier |
+| Score 650–749 | Neutral |
+| Score 500–649 | -3 modifier |
+| Score < 500 | -7 modifier |
+| CIBIL/CRIF fraud alert | Hard stop — application flagged |
+| DPD 90+ delinquency | -10 modifier |
+
+*Bureau status is displayed in the Fraud Pre-Checks card.*
+
+**Stage 3: Credit Scoring** (rule-based, explainable)
+
+Results displayed in "Underwriting Recommendation" card:
+
+| Output | Description |
+|--------|-------------|
+| Score (0–100) | Color-coded gauge with breakdown |
+| Recommendation | APPROVE / REFER / REJECT |
+| Eligibility Amounts | Cash flow eligible, collateral eligible, final recommended |
+| Approval Reasons | Positive factors (e.g., "Strong EMI coverage ≥2x") |
+| Risk Flags | Concerns including fraud flags (e.g., "Unsecured exposure") |
+| Recommendations | Actionable suggestions (e.g., "Consider obtaining collateral") |
+
+#### Underwriting Action Panel
+
+| Action | When Available | What Happens |
+|--------|---------------|-------------|
+| **Run Underwriting Engine** | When no decision exists | Runs full 3-stage pipeline. Status → `UNDER_REVIEW` |
+| **Approve & Sanction** | After recommendation generated | Form for sanction details. Status → `SANCTIONED` |
+| **Reject** | After recommendation generated | Override reason required if system recommends APPROVE. Status → `REJECTED` |
+| **Refer for Review** | After recommendation generated | Analyst escalation. Status stays `UNDER_REVIEW` |
+| **Re-run Engine** | After recommendation generated | Re-calculates with latest data |
+
+#### System Override Support
+When the analyst's decision differs from the engine recommendation:
+- Warning banner displayed ("System Override")
+- Override reason is **mandatory**
+- Override flag recorded in Approval record
+- Audit log records the override event
+
+#### Sanction Details
+When approving, analyst enters:
+- Sanctioned amount, tenure, interest rate, processing fee
+- Conditions (free text)
+- *Collateral enforcement note*: If secured, displays "Collateral charge creation, registration, and enforcement to be handled as per NBFC internal recovery and security enforcement process."
+
+---
+
+### 3.5 Underwriting Recommendation Engine
+
+> System-assisted underwriting with analyst control. The engine produces recommendations — analysts make decisions.
+
+#### Scoring Dimensions
+| Dimension | Weight | Criteria |
+|-----------|--------|----------|
+| Cash Flow Strength | 30% | FCF-to-EMI ratio |
+| EMI Coverage | 25% | Ability to service EMI from free cash flow |
+| Revenue Stability | 20% | Inflow coefficient of variation |
+| Collateral Coverage | 15% | Collateral value vs. loan amount + type quality |
+| Business Profile | 10% | Vintage (years) + industry risk rating |
+
+#### Industry Risk Classification
+| Risk Band | Industries |
+|-----------|-----------|
+| **Low** | Manufacturing, IT Services, Healthcare |
+| **Medium** | Retail, Construction, Agriculture, Trading |
+| **High** | Real Estate, Hospitality |
+
+#### Collateral LTV Limits
+| Collateral Type | Max LTV |
+|-----------------|---------|
+| Fixed Deposit | 90% |
+| Invoice Financing | 80% |
+| Loan Against Property | 70% |
+| Machinery | 60% |
+| Stock / Inventory | 50% |
+
+---
+
+### 3.6 Portfolio View & Risk Governance
+
+**Purpose**: Overview of sanctioned/active loans **and** portfolio-level concentration risk monitoring.
+
+#### Portfolio Summary
+| Widget | Data Shown |
+|--------|-----------|
+| Active Loans | Count |
+| Total Sanctioned | Sum of all sanctioned amounts |
+| Active Borrowers | Unique borrower count |
+| Secured % | Percentage of secured loans |
+| Avg Loan Size | Portfolio average |
+
+#### Risk Governance Dashboard
+
+| Metric | Description | Alert Threshold |
+|--------|-------------|-----------------|
+| **Security Ratio** | Secured vs. unsecured split (%) with progress bar | Unsecured > 60% |
+| **Industry Exposure %** | Top 5 industries by sanctioned amount with % | Any industry > 35% |
+| **Top Borrower Exposure** | Top 5 borrowers by total sanctioned amount with % | Any borrower > 25% |
+| **Concentration Warnings** | Auto-generated alerts when thresholds exceeded | Yellow alert banner |
+
+*Concentration warnings are displayed as prominent alert banners above the metrics grid when any industry exceeds 35% of total portfolio.*
+
+#### Collateral & Industry Breakdown
+| Widget | Data Shown |
+|--------|-----------|
+| Security Classification | Breakdown by collateral type with count and value |
+| Industry Exposure | Distribution of loans by industry with progress bars |
+
+#### Active Loans Table
+Application no, borrower, industry, sanctioned amount, tenure, interest rate, security type.
+
+---
+
+### 3.7 Settings (NBFC Configuration)
+
+**Purpose**: Configure underwriting parameters.
+
+| Section | Configurable Items |
+|---------|-------------------|
+| Credit Policy Version | `v1.0` (editable) — for audits, backtesting, investor diligence |
+| Score Thresholds | Approve threshold (default: 70), Refer threshold (default: 50) |
+| Cash Flow Rules | Min EMI coverage (default: 1.5x), Max inflow volatility (default: 50%), Min vintage (default: 12 months) |
+| LTV Limits | Per collateral type (LAP: 70%, Machinery: 60%, etc.) |
+| Industry Risk Bands | Risk classification per industry |
+
+---
+
+## 4. Workflow: End-to-End Loan Processing
+
+```
+1. ANALYST creates New Application (4-step form)
+   └→ Status: APPLIED
+
+2. ANALYST runs Underwriting Engine
+   ├→ Stage 1: Fraud pre-checks (PAN/GSTIN, inflow spikes, turnover mismatch...)
+   │   └→ If HIGH_RISK: auto-reject recommendation
+   ├→ Stage 2: Bureau overlay (optional negative filter)
+   │   └→ Score modifier applied (-10 to +5)
+   └→ Stage 3: Credit scoring (5 dimensions, 100-point scale)
+       └→ Recommendation: APPROVE / REFER / REJECT
+       └→ Status: UNDER_REVIEW
+
+3. ANALYST reviews recommendation + fraud checks + risk flags
+   ├→ If APPROVE: Enter sanction details → Status: SANCTIONED
+   ├→ If REJECT: Confirm rejection → Status: REJECTED
+   │   └→ If overriding system APPROVE: override reason mandatory
+   └→ If REFER: Send for additional review → stays UNDER_REVIEW
+
+4. All actions logged in Audit Trail with user, timestamp, details
+5. Portfolio Risk Governance monitors concentration automatically
+```
+
+---
+
+## 5. Data Seeding (Demo Data)
+
+| Entity | Count | Details |
+|--------|-------|---------|
+| NBFC | 1 | First Finance Corporation |
+| Users | 3 | Admin, Analyst, Viewer |
+| Borrowers | 8 | Various industries |
+| Loan Applications | 9 | Mix of statuses |
+| Financial Data | 8 | Bank statement analysis for each borrower |
+| Collateral | 5 | Various types (LAP, Machinery, Invoice, Stock) |
+| Credit Decisions | 7 | Scored applications |
+| Approvals | 3 | Sanctioned loans |
+| Audit Logs | 15+ | Event trail |
+
+### Demo Credentials
+| Email | Password | Role |
+|-------|----------|------|
+| `admin@credflow.io` | `Admin@123` | NBFC Admin |
+| `analyst@credflow.io` | `Analyst@123` | Credit Analyst |
+| `viewer@credflow.io` | `Viewer@123` | Viewer |
