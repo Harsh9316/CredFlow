@@ -1,0 +1,55 @@
+{
+  "name": "@credflow/engine",
+  "version": "0.1.0",
+  "description": "Explainable, policy-driven credit decisioning for SME lending: fraud pre-checks, bureau overlay, cash-flow scoring and loan sizing.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "credit",
+    "underwriting",
+    "lending",
+    "nbfc",
+    "msme",
+    "scorecard",
+    "fraud",
+    "explainable"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Harsh9316/CredFlow.git",
+    "directory": "packages/engine"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsup": "^8.5.1",
+    "typescript": "^5",
+    "vitest": "^3.2.7",
+    "yaml": "^2.9.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

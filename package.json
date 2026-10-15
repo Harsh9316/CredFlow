@@ -7,10 +7,15 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run typecheck -w @credflow/engine",
     "db:push": "prisma db push",
     "db:seed": "tsx seed.ts",
-    "setup": "prisma db push && tsx seed.ts"
+    "setup": "prisma db push && tsx seed.ts",
+    "test": "npm run test -w @credflow/engine",
+    "build:engine": "npm run build -w @credflow/engine",
+    "policy": "tsx scripts/policy.ts",
+    "policy:sync-default": "tsx scripts/generate-default-policy.ts",
+    "smoke": "tsx scripts/smoke-test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -21,7 +26,8 @@
     "prisma": "^5.22.0",
     "react": "19.2.3",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -37,5 +43,8 @@
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

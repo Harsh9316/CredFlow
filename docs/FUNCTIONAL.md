@@ -266,17 +266,25 @@ Application no, borrower, industry, sanctioned amount, tenure, interest rate, se
 
 ---
 
-### 3.7 Settings (NBFC Configuration)
+### 3.7 Settings (Credit Policy)
 
-**Purpose**: Configure underwriting parameters.
+**Purpose**: Show the credit policy the engine applies to this NBFC's decisions.
 
-| Section | Configurable Items |
-|---------|-------------------|
-| Credit Policy Version | `v1.0` (editable) — for audits, backtesting, investor diligence |
-| Score Thresholds | Approve threshold (default: 70), Refer threshold (default: 50) |
-| Cash Flow Rules | Min EMI coverage (default: 1.5x), Max inflow volatility (default: 50%), Min vintage (default: 12 months) |
-| LTV Limits | Per collateral type (LAP: 70%, Machinery: 60%, etc.) |
-| Industry Risk Bands | Risk classification per industry |
+Each NBFC has one active, versioned credit policy (see `policies/*.yaml`). The Settings page displays it read-only:
+
+| Section | Contents |
+|---------|----------|
+| Active policy | Name, `id@version`, SHA-256 checksum |
+| Decision thresholds | Approve / refer / reject score ranges |
+| Affordability | EMI method and assumed rate, min EMI coverage, unsecured sizing, collateral headroom |
+| Scorecard | Max points and bands for all five components |
+| LTV limits | Per collateral type |
+| Industry risk | Industry → LOW / MEDIUM / HIGH, plus the default for unlisted industries |
+| Fraud pre-checks | Each rule's status, severity and trigger; the hard-stop severity |
+| Bureau overlay | Score-band and delinquency modifiers |
+| Policy history | Every version applied, when it was activated, and how many decisions used it |
+
+Policies are changed by applying a new version with `npm run policy -- apply <file> --nbfc <CODE>`. Editing policies in the UI is planned.
 
 ---
 

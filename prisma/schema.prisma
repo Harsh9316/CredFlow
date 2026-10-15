@@ -14,19 +14,19 @@ datasource db {
 
 // Multi-tenant NBFC organization
 model NBFC {
-  id          String   @id @default(cuid())
-  name        String
-  code        String   @unique
-  licenseNo   String?
-  address     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  isActive    Boolean  @default(true)
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  licenseNo String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isActive  Boolean  @default(true)
 
   users            User[]
   borrowers        Borrower[]
   loanApplications LoanApplication[]
-  settings         Settings?
+  creditPolicies   CreditPolicy[]
 }
 
 // User with role-based access
@@ -42,36 +42,36 @@ model User {
   updatedAt DateTime @updatedAt
   isActive  Boolean  @default(true)
 
-  nbfc       NBFC        @relation(fields: [nbfcId], references: [id])
-  approvals  Approval[]
-  auditLogs  AuditLog[]
+  nbfc      NBFC       @relation(fields: [nbfcId], references: [id])
+  approvals Approval[]
+  auditLogs AuditLog[]
 }
 
 // ==================== BORROWER & LOAN ====================
 
 // SME borrower profile
 model Borrower {
-  id              String   @id @default(cuid())
-  nbfcId          String
-  businessName    String
-  legalName       String?
-  pan             String?
-  gstin           String?
-  industry        String
-  subIndustry     String?
-  constitution    String   // Proprietorship, Partnership, LLP, Pvt Ltd, etc.
-  vintage         Int      // Months in business
-  annualTurnover  Float?
-  employeeCount   Int?
-  address         String?
-  city            String?
-  state           String?
-  pincode         String?
-  contactPerson   String
-  contactPhone    String
-  contactEmail    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  nbfcId         String
+  businessName   String
+  legalName      String?
+  pan            String?
+  gstin          String?
+  industry       String
+  subIndustry    String?
+  constitution   String // Proprietorship, Partnership, LLP, Pvt Ltd, etc.
+  vintage        Int // Months in business
+  annualTurnover Float?
+  employeeCount  Int?
+  address        String?
+  city           String?
+  state          String?
+  pincode        String?
+  contactPerson  String
+  contactPhone   String
+  contactEmail   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   nbfc             NBFC              @relation(fields: [nbfcId], references: [id])
   loanApplications LoanApplication[]
@@ -82,24 +82,24 @@ model Borrower {
 // Status: APPLIED | UNDER_REVIEW | PENDING_DOCS | APPROVED | REJECTED | SANCTIONED | WITHDRAWN
 // Priority: LOW | NORMAL | HIGH | URGENT
 model LoanApplication {
-  id              String   @id @default(cuid())
-  applicationNo   String   @unique
+  id              String    @id @default(cuid())
+  applicationNo   String    @unique
   nbfcId          String
   borrowerId      String
   requestedAmount Float
-  requestedTenure Int      // Months
+  requestedTenure Int // Months
   purpose         String?
-  status          String   @default("APPLIED")
-  sourcePlatform  String?  // ERP, POS, Direct, etc.
+  status          String    @default("APPLIED")
+  sourcePlatform  String? // ERP, POS, Direct, etc.
   sourceReference String?
-  priority        String   @default("NORMAL")
+  priority        String    @default("NORMAL")
   assignedTo      String?
-  appliedAt       DateTime @default(now())
+  appliedAt       DateTime  @default(now())
   reviewedAt      DateTime?
   decidedAt       DateTime?
   sanctionedAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   nbfc           NBFC            @relation(fields: [nbfcId], references: [id])
   borrower       Borrower        @relation(fields: [borrowerId], references: [id])
@@ -113,30 +113,30 @@ model LoanApplication {
 
 // Financial data for analysis
 model FinancialData {
-  id                    String   @id @default(cuid())
-  borrowerId            String
-  dataType              String   // BANK_STATEMENT, ERP_INVOICE, GST_RETURN
-  periodStart           DateTime
-  periodEnd             DateTime
-  
+  id          String   @id @default(cuid())
+  borrowerId  String
+  dataType    String // BANK_STATEMENT, ERP_INVOICE, GST_RETURN
+  periodStart DateTime
+  periodEnd   DateTime
+
   // Bank statement metrics
-  totalCredits          Float?
-  totalDebits           Float?
-  avgMonthlyInflow      Float?
-  avgMonthlyExpenses    Float?
-  freeCashFlow          Float?
-  inflowVolatility      Float?   // Coefficient of variation
-  
+  totalCredits       Float?
+  totalDebits        Float?
+  avgMonthlyInflow   Float?
+  avgMonthlyExpenses Float?
+  freeCashFlow       Float?
+  inflowVolatility   Float? // Coefficient of variation
+
   // Invoice metrics
-  totalInvoiceValue     Float?
-  avgInvoiceValue       Float?
-  invoiceCount          Int?
-  
+  totalInvoiceValue Float?
+  avgInvoiceValue   Float?
+  invoiceCount      Int?
+
   // Cash flow analysis
-  monthlyData           String?  // JSON string of monthly breakdown
-  
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  monthlyData String? // JSON string of monthly breakdown
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   borrower Borrower @relation(fields: [borrowerId], references: [id])
 }
@@ -146,22 +146,22 @@ model FinancialData {
 // Collateral information
 // CollateralType: LAP | MACHINERY | INVOICE | STOCK | FD | NONE
 model Collateral {
-  id                  String   @id @default(cuid())
-  applicationId       String   @unique
-  collateralType      String
-  description         String?
-  assessedValue       Float
-  ltv                 Float    // LTV limit percentage (0-100)
-  collateralCap       Float    // Calculated: assessedValue * (ltv/100)
-  hasPersonalGuarantee Boolean @default(false)
-  guarantorName       String?
-  guarantorRelation   String?
-  valuationDate       DateTime?
-  valuationAgency     String?
-  documentReference   String?
-  remarks             String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  applicationId        String    @unique
+  collateralType       String
+  description          String?
+  assessedValue        Float
+  ltv                  Float // LTV limit percentage (0-100)
+  collateralCap        Float // Calculated: assessedValue * (ltv/100)
+  hasPersonalGuarantee Boolean   @default(false)
+  guarantorName        String?
+  guarantorRelation    String?
+  valuationDate        DateTime?
+  valuationAgency      String?
+  documentReference    String?
+  remarks              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   application LoanApplication @relation(fields: [applicationId], references: [id])
 }
@@ -171,34 +171,38 @@ model Collateral {
 // Credit decision with explainability
 // Decision: APPROVE | REFER | REJECT
 model CreditDecision {
-  id                   String   @id @default(cuid())
-  applicationId        String   @unique
-  
+  id            String @id @default(cuid())
+  applicationId String @unique
+
   // Scoring
-  creditScore          Int      // 0-100
-  decision             String
-  
+  creditScore Int // 0-100
+  decision    String
+
   // Eligibility amounts
-  cashFlowEligible     Float
-  collateralEligible   Float
-  finalRecommendedAmt  Float
-  
+  cashFlowEligible    Float
+  collateralEligible  Float
+  finalRecommendedAmt Float
+
   // Score breakdown (JSON)
-  scoreBreakdown       String?  // JSON with component scores
-  
+  scoreBreakdown String? // JSON with component scores
+
   // Explanations (JSON arrays as strings)
-  approvalReasons      String?  // JSON array of approval reasons
-  riskFlags            String?  // JSON array of risk flags
-  recommendations      String?  // JSON array of recommendations
-  
+  approvalReasons String? // JSON array of approval reasons
+  riskFlags       String? // JSON array of risk flags
+  recommendations String? // JSON array of recommendations
+
   // Calculation inputs (JSON)
-  calculationInputs    String?  // JSON with all inputs used
-  
-  generatedAt          DateTime @default(now())
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  calculationInputs String? // JSON with all inputs used
+
+  // Exact policy version the decision was made under
+  policyId String?
+
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   application LoanApplication @relation(fields: [applicationId], references: [id])
+  policy      CreditPolicy?   @relation(fields: [policyId], references: [id])
 }
 
 // ==================== APPROVAL & AUDIT ====================
@@ -206,27 +210,27 @@ model CreditDecision {
 // NBFC final approval/sanction
 // Decision: APPROVE | REFER | REJECT
 model Approval {
-  id                String   @id @default(cuid())
-  applicationId     String   @unique
-  approvedBy        String
-  
+  id            String @id @default(cuid())
+  applicationId String @unique
+  approvedBy    String
+
   // Decision
-  finalDecision     String
-  overrideSystem    Boolean  @default(false)
-  overrideReason    String?
-  
+  finalDecision  String
+  overrideSystem Boolean @default(false)
+  overrideReason String?
+
   // Sanction details
-  sanctionedAmount  Float?
-  sanctionedTenure  Int?     // Months
-  interestRate      Float?   // Annual %
-  processingFee     Float?
-  
+  sanctionedAmount Float?
+  sanctionedTenure Int? // Months
+  interestRate     Float? // Annual %
+  processingFee    Float?
+
   // Conditions
-  conditions        String?  // JSON array of conditions
-  
-  approvedAt        DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  conditions String? // JSON array of conditions
+
+  approvedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   application LoanApplication @relation(fields: [applicationId], references: [id])
   user        User            @relation(fields: [approvedBy], references: [id])
@@ -234,49 +238,40 @@ model Approval {
 
 // Audit trail
 model AuditLog {
-  id              String   @id @default(cuid())
-  applicationId   String?
-  userId          String
-  action          String
-  details         String?  // JSON with action details
-  ipAddress       String?
-  userAgent       String?
-  timestamp       DateTime @default(now())
+  id            String   @id @default(cuid())
+  applicationId String?
+  userId        String
+  action        String
+  details       String? // JSON with action details
+  ipAddress     String?
+  userAgent     String?
+  timestamp     DateTime @default(now())
 
   application LoanApplication? @relation(fields: [applicationId], references: [id])
   user        User             @relation(fields: [userId], references: [id])
 }
 
-// ==================== SETTINGS & CONFIGURATION ====================
+// ==================== CREDIT POLICY ====================
 
-// NBFC-specific settings
-model Settings {
-  id                 String   @id @default(cuid())
-  nbfcId             String   @unique
-  
-  // Score thresholds
-  approveThreshold   Int      @default(70)
-  referThreshold     Int      @default(50)
-  
-  // Industry risk bands (JSON)
-  industryRiskBands  String?  // JSON object { industry: riskLevel }
-  
-  // LTV limits by collateral type (JSON)
-  ltvLimits          String?  // JSON object { collateralType: maxLTV }
-  
-  // Cash flow rules
-  minEMICoverage     Float    @default(1.5)
-  maxInflowCV        Float    @default(0.5)  // Max volatility allowed
-  minBusinessVintage Int      @default(12)   // Months
-  
-  // Credit policy version (for audits, backtesting, investor diligence)
-  creditPolicyVersion String  @default("v1.0")
-  
-  // API keys placeholder
-  apiKeys            String?  // JSON array of API key configs
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+// Versioned credit policy (see policies/*.yaml and packages/engine/src/policy.ts).
+// Rows are immutable: changing a policy means adding a new version and activating it,
+// so every past decision can be traced to, and re-run under, the policy it used.
+model CreditPolicy {
+  id          String    @id @default(cuid())
+  nbfcId      String
+  policyKey   String // `id` field of the policy document
+  name        String
+  version     String
+  document    String // Validated policy JSON
+  checksum    String // SHA-256 of the canonical document
+  isActive    Boolean   @default(false)
+  activatedAt DateTime?
+  createdBy   String? // User id, or null when applied from the CLI
+  createdAt   DateTime  @default(now())
 
-  nbfc NBFC @relation(fields: [nbfcId], references: [id])
+  nbfc      NBFC             @relation(fields: [nbfcId], references: [id])
+  decisions CreditDecision[]
+
+  @@unique([nbfcId, policyKey, version])
+  @@index([nbfcId, isActive])
 }

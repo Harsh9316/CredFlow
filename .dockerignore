@@ -1,4 +1,4 @@
-node_modules
+**/node_modules
 .next
 .git
 .env
@@ -6,3 +6,5 @@ node_modules
 !.env.example
 *.db
 *.db-journal
+packages/*/dist
+*.tsbuildinfo

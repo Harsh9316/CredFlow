@@ -1,0 +1,113 @@
+# CredFlow v0.1 behaviour, expressed as a policy.
+# Kept so decisions made before policies became configurable can be reproduced exactly.
+# Note: affordability uses a flat factor that ignores interest. Prefer credflow-default for new decisions.
+id: legacy
+name: CredFlow v0.1 scorecard
+version: 0.1.0
+description: Hard-coded scorecard shipped in CredFlow v0.1.
+
+decision:
+  approveThreshold: 70
+  referThreshold: 50
+
+affordability:
+  method: flat-factor
+  annualInterestRate: 12
+  flatFactor: 0.85
+  minEMICoverage: 1.5
+  unsecuredHaircut: 0.8
+  collateralHeadroom: 1.1
+
+scoring:
+  cashFlow:
+    max: 30
+    direction: higher-is-better
+    bands:
+      - { threshold: 2, points: 30 }
+      - { threshold: 1.5, points: 25 }
+      - { threshold: 1.2, points: 20 }
+      - { threshold: 1, points: 15 }
+      - { threshold: 0.8, points: 10 }
+    otherwise: 5
+  emiCoverage:
+    max: 25
+    direction: higher-is-better
+    bands:
+      - { threshold: 2.5, points: 25 }
+      - { threshold: 2, points: 22 }
+      - { threshold: 1.75, points: 18 }
+      - { threshold: 1.5, points: 15 }
+      - { threshold: 1.25, points: 10 }
+    otherwise: 5
+  stability:
+    max: 20
+    direction: lower-is-better
+    bands:
+      - { threshold: 0.15, points: 20 }
+      - { threshold: 0.25, points: 17 }
+      - { threshold: 0.35, points: 14 }
+      - { threshold: 0.5, points: 10 }
+    otherwise: 5
+  collateral:
+    max: 15
+    coverageBands:
+      - { threshold: 1.2, points: 15 }
+      - { threshold: 1, points: 12 }
+      - { threshold: 0.8, points: 10 }
+      - { threshold: 0.5, points: 7 }
+    otherwise: 4
+    preferredTypes: [LAP, FD]
+    preferredTypeBonus: 2
+    personalGuaranteeBonus: 1
+  profile:
+    max: 10
+    vintageBands:
+      - { threshold: 60, points: 5 }
+      - { threshold: 36, points: 4 }
+      - { threshold: 24, points: 3 }
+      - { threshold: 12, points: 2 }
+    vintageOtherwise: 1
+    industryPoints: { LOW: 5, MEDIUM: 3, HIGH: 1 }
+
+collateral:
+  ltvLimits: { LAP: 70, MACHINERY: 60, INVOICE: 80, STOCK: 50, FD: 90, NONE: 0 }
+
+industries:
+  defaultBand: MEDIUM
+  riskBands:
+    Manufacturing: LOW
+    IT Services: LOW
+    Healthcare: LOW
+    Retail: MEDIUM
+    Construction: MEDIUM
+    Agriculture: MEDIUM
+    Real Estate: HIGH
+    Hospitality: HIGH
+    Trading: MEDIUM
+
+explanations:
+  strongEMICoverage: 2
+  stableInflowCV: 0.25
+  maxInflowCV: 0.5
+  establishedVintageMonths: 36
+  minBusinessVintageMonths: 12
+
+fraud:
+  hardStopSeverity: CRITICAL
+  rules:
+    panGstinMismatch: { severity: CRITICAL }
+    missingIdentity: { severity: WARNING }
+    inflowSpike: { severity: WARNING, multipleOfAverage: 2.5, minMonths: 3 }
+    turnoverBankShortfall: { severity: CRITICAL, minBankToTurnoverRatio: 0.3 }
+    excessiveBankFlow: { severity: WARNING, maxBankToTurnoverRatio: 3 }
+    newEntityLargeLoan: { severity: WARNING, maxVintageMonths: 6, amountAbove: 2500000 }
+    loanExceedsTurnover: { severity: WARNING }
+
+bureau:
+  fraudAlertModifier: -100
+  delinquencyModifier: -10
+  scoreBands:
+    - { minScore: 750, modifier: 5 }
+    - { minScore: 650, modifier: 0 }
+    - { minScore: 500, modifier: -3 }
+  otherwiseModifier: -7
