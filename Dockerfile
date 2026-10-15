@@ -5,6 +5,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && r
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY packages/engine/package.json ./packages/engine/
 COPY prisma ./prisma
 RUN npm ci
 

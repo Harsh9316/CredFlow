@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { requireApiSession } from '@/lib/auth'
-import { getCreditPolicy } from '@/lib/policy'
-import { generateDecision } from '@/lib/decision-engine'
-import { runFraudPreChecks, applyBureauOverlay } from '@/lib/fraud-checks'
+import { getActivePolicy } from '@/lib/policy'
+import { evaluateApplication, type ApplicationInput, type CollateralType, type MonthlyFlow } from '@credflow/engine'
 
 export async function POST(
   request: Request,
@@ -15,7 +14,6 @@ export async function POST(
 
     const { id } = await params
 
-    // Get application with all related data
     const application = await prisma.loanApplication.findFirst({
       where: { id, nbfcId: session.nbfcId },
       include: {
@@ -36,155 +34,115 @@ export async function POST(
       return NextResponse.json({ error: 'No financial data found for borrower. Please add financial data first.' }, { status: 400 })
     }
 
-    // Parse monthly data for fraud checks
-    const monthlyData = financialData.monthlyData ? JSON.parse(financialData.monthlyData) : []
-
-    // ── STAGE 1: FRAUD PRE-CHECKS (before credit assessment) ──
-    const fraudResult = runFraudPreChecks({
+    const input: ApplicationInput = {
+      requestedAmount: application.requestedAmount,
+      requestedTenure: application.requestedTenure,
       borrower: {
         pan: application.borrower.pan,
         gstin: application.borrower.gstin,
-        businessName: application.borrower.businessName,
         vintage: application.borrower.vintage,
+        industry: application.borrower.industry,
         annualTurnover: application.borrower.annualTurnover,
       },
       financial: {
         avgMonthlyInflow: financialData.avgMonthlyInflow || 0,
         avgMonthlyExpenses: financialData.avgMonthlyExpenses || 0,
-        inflowVolatility: financialData.inflowVolatility || 0.5,
-        monthlyData,
-      },
-      requestedAmount: application.requestedAmount,
-    })
-
-    // ── STAGE 2: BUREAU OVERLAY (optional, negative filter) ──
-    // In production, this would call CIBIL/CRIF API
-    // For now, bureau data is not available — engine proceeds without it
-    const bureauResult = applyBureauOverlay(undefined, false, false)
-
-    // ── STAGE 3: CREDIT SCORING (only if fraud checks don't hard-block) ──
-    const monthlyEMI = application.requestedAmount / application.requestedTenure
-    const emiCoverageRatio = financialData.freeCashFlow ? financialData.freeCashFlow / monthlyEMI : 0
-
-    const inputs = {
-      requestedAmount: application.requestedAmount,
-      requestedTenure: application.requestedTenure,
-      financial: {
-        avgMonthlyInflow: financialData.avgMonthlyInflow || 0,
-        avgMonthlyExpenses: financialData.avgMonthlyExpenses || 0,
         freeCashFlow: financialData.freeCashFlow || 0,
         inflowVolatility: financialData.inflowVolatility || 0.5,
-        emiCoverageRatio,
+        monthlyData: financialData.monthlyData ? (JSON.parse(financialData.monthlyData) as MonthlyFlow[]) : [],
       },
       collateral: application.collateral ? {
-        type: application.collateral.collateralType as 'LAP' | 'MACHINERY' | 'INVOICE' | 'STOCK' | 'FD' | 'NONE',
+        type: application.collateral.collateralType as CollateralType,
         assessedValue: application.collateral.assessedValue,
         ltv: application.collateral.ltv,
         hasPersonalGuarantee: application.collateral.hasPersonalGuarantee,
       } : null,
-      borrower: {
-        vintage: application.borrower.vintage,
-        industry: application.borrower.industry,
-        annualTurnover: application.borrower.annualTurnover || undefined,
-      }
+      // Bureau integration is not wired up yet; the engine treats missing data as neutral
+      bureau: null,
     }
 
-    const policy = await getCreditPolicy(session.nbfcId)
-    const result = generateDecision(inputs, policy)
+    const { policy, policyId, checksum } = await getActivePolicy(session.nbfcId)
+    const result = evaluateApplication(input, policy)
 
-    // Apply bureau modifier to credit score
-    const adjustedScore = Math.max(0, Math.min(100, result.creditScore + bureauResult.modifier))
-
-    // Merge fraud flags into risk flags
-    const allRiskFlags = [...result.riskFlags]
-    const allRecommendations = [...result.recommendations]
-
-    // Add fraud flags as risk flags
-    fraudResult.flags.forEach(f => {
-      if (f.severity === 'CRITICAL') {
-        allRiskFlags.unshift(`🚨 FRAUD: ${f.description}`)
-      } else {
-        allRiskFlags.push(`⚠ Fraud Check: ${f.description}`)
-      }
-      allRecommendations.push(f.recommendation)
-    })
-
-    // Add bureau notes
-    bureauResult.notes.forEach(n => {
-      allRecommendations.push(n)
-    })
-
-    // Override decision if fraud is HIGH_RISK
-    let finalDecision = result.decision
-    if (fraudResult.riskLevel === 'HIGH_RISK') {
-      finalDecision = 'REJECT'
+    const calculationInputs = {
+      ...input,
+      emi: result.emi,
+      emiCoverageRatio: result.emiCoverageRatio,
+      creditPolicyVersion: `${policy.id}@${policy.version}`,
+      policyChecksum: checksum,
+      fraudPreCheck: {
+        riskLevel: result.fraud.riskLevel,
+        passed: result.fraud.passed,
+        flagCount: result.fraud.flags.length,
+        summary: result.fraud.summary,
+      },
+      bureauOverlay: {
+        available: result.bureau.available,
+        bureauScore: result.bureau.bureauScore,
+        modifier: result.bureau.modifier,
+      },
     }
 
-    // Delete existing decision if re-running
-    await prisma.creditDecision.deleteMany({ where: { applicationId: id } })
+    const decisionData = {
+      creditScore: result.creditScore,
+      decision: result.decision,
+      cashFlowEligible: result.cashFlowEligible,
+      collateralEligible: result.collateralEligible,
+      finalRecommendedAmt: result.finalRecommendedAmt,
+      scoreBreakdown: JSON.stringify(result.scoreBreakdown),
+      approvalReasons: JSON.stringify(result.approvalReasons),
+      riskFlags: JSON.stringify(result.riskFlags),
+      recommendations: JSON.stringify(result.recommendations),
+      calculationInputs: JSON.stringify(calculationInputs),
+      policyId,
+      generatedAt: new Date(),
+    }
 
-    // Save credit decision with fraud + bureau data
-    await prisma.creditDecision.create({
-      data: {
-        applicationId: id,
-        creditScore: adjustedScore,
-        decision: finalDecision,
-        cashFlowEligible: result.cashFlowEligible,
-        collateralEligible: result.collateralEligible,
-        finalRecommendedAmt: fraudResult.riskLevel === 'HIGH_RISK' ? 0 : result.finalRecommendedAmt,
-        scoreBreakdown: JSON.stringify(result.scoreBreakdown),
-        approvalReasons: JSON.stringify(result.approvalReasons),
-        riskFlags: JSON.stringify(allRiskFlags),
-        recommendations: JSON.stringify(allRecommendations),
-        calculationInputs: JSON.stringify({
-          ...inputs,
-          creditPolicyVersion: policy.version,
-          fraudPreCheck: {
-            riskLevel: fraudResult.riskLevel,
-            passed: fraudResult.passed,
-            flagCount: fraudResult.flags.length,
-            summary: fraudResult.summary,
-          },
-          bureauOverlay: {
-            available: bureauResult.available,
-            bureauScore: bureauResult.bureauScore,
-            modifier: bureauResult.modifier,
-          }
-        }),
-      }
-    })
-
-    // Update application status
-    await prisma.loanApplication.update({
-      where: { id },
-      data: {
-        status: 'UNDER_REVIEW',
-        reviewedAt: new Date(),
-      }
-    })
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        applicationId: id,
-        userId: session.id,
-        action: fraudResult.riskLevel === 'HIGH_RISK' ? 'FRAUD_FLAG_RAISED' : 'RECOMMENDATION_GENERATED',
-        details: JSON.stringify({
-          creditScore: adjustedScore,
-          decision: finalDecision,
-          recommendedAmount: result.finalRecommendedAmt,
-          fraudRiskLevel: fraudResult.riskLevel,
-          fraudFlags: fraudResult.flags.length,
-          bureauAvailable: bureauResult.available,
-        }),
-      }
-    })
+    await prisma.$transaction([
+      prisma.creditDecision.upsert({
+        where: { applicationId: id },
+        create: { applicationId: id, ...decisionData },
+        update: decisionData,
+      }),
+      prisma.loanApplication.update({
+        where: { id },
+        data: { status: 'UNDER_REVIEW', reviewedAt: new Date() },
+      }),
+      prisma.auditLog.create({
+        data: {
+          applicationId: id,
+          userId: session.id,
+          action: result.fraud.riskLevel === 'HIGH_RISK' ? 'FRAUD_FLAG_RAISED' : 'RECOMMENDATION_GENERATED',
+          details: JSON.stringify({
+            creditScore: result.creditScore,
+            decision: result.decision,
+            recommendedAmount: result.finalRecommendedAmt,
+            fraudRiskLevel: result.fraud.riskLevel,
+            fraudFlags: result.fraud.flags.length,
+            bureauAvailable: result.bureau.available,
+            policy: `${policy.id}@${policy.version}`,
+            policyChecksum: checksum,
+          }),
+        }
+      }),
+    ])
 
     return NextResponse.json({
       success: true,
-      decision: { ...result, creditScore: adjustedScore, decision: finalDecision, riskFlags: allRiskFlags, recommendations: allRecommendations },
-      fraudPreCheck: fraudResult,
-      bureauOverlay: bureauResult,
+      decision: {
+        creditScore: result.creditScore,
+        decision: result.decision,
+        cashFlowEligible: result.cashFlowEligible,
+        collateralEligible: result.collateralEligible,
+        finalRecommendedAmt: result.finalRecommendedAmt,
+        scoreBreakdown: result.scoreBreakdown,
+        approvalReasons: result.approvalReasons,
+        riskFlags: result.riskFlags,
+        recommendations: result.recommendations,
+      },
+      fraudPreCheck: result.fraud,
+      bureauOverlay: result.bureau,
+      policy: { id: policy.id, version: policy.version, checksum },
     })
   } catch (error) {
     console.error('Run recommendation error:', error)

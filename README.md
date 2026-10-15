@@ -4,7 +4,7 @@
 
 CredFlow takes an SME loan application through fraud pre-checks, an optional bureau overlay and a cash-flow-first credit score, then recommends approve / refer / reject with the reasons behind it. Analysts make the final call, and every step is written to an audit trail.
 
-> CredFlow does not replace your credit policy. Each NBFC configures its own thresholds, LTV limits and industry risk bands, and the engine applies them.
+> CredFlow does not replace your credit policy, it runs it. Each NBFC's policy is a versioned YAML file covering thresholds, scorecard bands, LTV limits, industry risk, fraud rules and bureau modifiers, and every decision records the exact version it used.
 
 ## Why CredFlow
 
@@ -12,7 +12,9 @@ CredFlow takes an SME loan application through fraud pre-checks, an optional bur
 - **Fraud is handled separately from credit risk.** Critical fraud signals such as a PAN/GSTIN mismatch or turnover that doesn't match bank flows force a reject recommendation before scoring. Credit risk is scored and priced.
 - **Cash flow first.** Bureau data adjusts the score but never gates it on its own, so thin-file MSMEs still get assessed.
 - **Multi-tenant.** Multiple NBFCs share one deployment, and each sees only its own borrowers, applications and policy.
-- **Auditable.** The policy version is stored with every decision. Analyst overrides require a reason and are logged.
+- **Policy as code.** Credit policy lives in validated, versioned YAML. Versions are immutable, and every decision links to the exact one it ran under.
+- **Use just the engine.** [`@credflow/engine`](packages/engine) is a pure TypeScript package with no database or framework, so you can drop it into an existing loan system.
+- **Auditable.** Analyst overrides require a reason and are logged.
 
 ## Quick start
 
@@ -59,9 +61,50 @@ Application ──► 1. Fraud pre-checks ──► 2. Bureau overlay ──► 
 
 The scoring model, thresholds and a worked example are in [docs/UNDERWRITING_EXPLAINED.md](docs/UNDERWRITING_EXPLAINED.md).
 
-## Configuring credit policy
+## Credit policies
 
-Each NBFC has a `Settings` row containing approve/refer thresholds, minimum EMI coverage, maximum inflow volatility, minimum business vintage, LTV limits by collateral type and industry risk bands. Any value an NBFC hasn't set falls back to the engine defaults in [`lib/decision-engine.ts`](lib/decision-engine.ts). The merged policy is loaded in [`lib/policy.ts`](lib/policy.ts), and its version is stored with every decision.
+Policies live in [`policies/`](policies):
+
+| Policy | For |
+|---|---|
+| [`credflow-default`](policies/credflow-default.yaml) | General MSME lending (the built-in default) |
+| [`unsecured-working-capital`](policies/unsecured-working-capital.yaml) | Unsecured lines; stricter, stability-weighted |
+| [`secured-lap`](policies/secured-lap.yaml) | Loan against property; collateral-led |
+| [`invoice-discounting`](policies/invoice-discounting.yaml) | Short-tenure receivables finance |
+| [`legacy-v0.1`](policies/legacy-v0.1.yaml) | Reproduces CredFlow v0.1 exactly |
+
+The sample policies are illustrative starting points, not credit advice. Calibrate them against your own portfolio.
+
+```bash
+npm run policy -- validate policies/*.yaml                    # schema-check policy files
+npm run policy -- apply policies/secured-lap.yaml --nbfc FFC  # store a new version and activate it
+npm run policy -- list --nbfc FFC                             # version history
+```
+
+To change a policy, copy a file, edit it, bump `version` and apply it. The Settings page shows the active policy in full. See [docs/TECHNICAL.md](docs/TECHNICAL.md#9-credit-policies) for the schema.
+
+## Using the engine on its own
+
+```ts
+import { evaluateApplication, DEFAULT_POLICY } from '@credflow/engine'
+
+const result = evaluateApplication(application, DEFAULT_POLICY)
+// result.decision, result.creditScore, result.finalRecommendedAmt,
+// result.approvalReasons, result.riskFlags, result.fraud, ...
+```
+
+See [packages/engine](packages/engine) for details.
+
+## Development
+
+```bash
+npm test             # engine tests, including 500-case parity with v0.1
+npm run typecheck
+npm run lint
+npm run smoke        # end-to-end checks against a running instance (BASE_URL, default http://localhost:3000)
+```
+
+CI runs all of these, plus a production build and a Docker boot test, on every pull request.
 
 ## Tech stack
 
@@ -75,8 +118,8 @@ Next.js 16 (App Router) · TypeScript · Prisma · SQLite (Postgres support plan
 
 ## Roadmap
 
-- Credit policy as versioned config files, validated against a schema
-- Decision engine published as a standalone npm package
+- Policy editing and side-by-side backtesting in the UI
+- Publish `@credflow/engine` to npm
 - Public REST API (OpenAPI), per-NBFC API keys and webhooks
 - Connector interfaces for bureau, Account Aggregator, GST and KYC providers
 - Postgres as the default database; maker-checker approvals

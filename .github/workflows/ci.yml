@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Validate bundled credit policies
+        run: npm run policy -- validate policies/*.yaml
+      - name: Engine default policy is in sync with policies/credflow-default.yaml
+        run: |
+          npm run policy:sync-default
+          git diff --exit-code packages/engine/src/default-policy.ts
+      - run: npm run build:engine
+      - run: npm run build
+        env:
+          SESSION_SECRET: ci-build-placeholder-secret-0123456789abcdef
+
+  smoke:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    needs: check
+    env:
+      DATABASE_URL: file:./ci.db
+      SESSION_SECRET: ci-smoke-test-secret-0123456789abcdef0123
+      BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run setup
+      - run: npm run build
+      - name: Start server
+        run: |
+          npm start > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3000/ && exit 0
+            sleep 1
+          done
+          cat server.log
+          exit 1
+      - run: npm run smoke
+      - name: Server log
+        if: failure()
+        run: cat server.log
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build -d
+      - name: Wait for the app and log in with a demo account
+        run: |
+          for i in $(seq 1 90); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/auth/login \
+              -H 'content-type: application/json' \
+              -d '{"email":"analyst@credflow.io","password":"Analyst@123"}' || true)
+            [ "$status" = "200" ] && echo "login OK" && exit 0
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: Container logs
+        if: failure()
+        run: docker compose logs

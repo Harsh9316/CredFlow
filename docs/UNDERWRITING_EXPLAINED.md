@@ -6,7 +6,7 @@ This document explains the logic behind the "System-Assisted Underwriting" in Cr
 
 ## 1. The Decision Pipeline
 
-The decision engine follows a 3-stage pipeline before arriving at a recommendation:
+The decision engine (`packages/engine`, published as `@credflow/engine`) follows a 3-stage pipeline before arriving at a recommendation. Every threshold, band and weight below comes from the NBFC's **credit policy**, a versioned YAML file in `policies/`. The numbers in this document are from `policies/credflow-default.yaml`.
 
 ### Stage 1: Fraud & Compliance Pre-Checks
 Before scoring, the system runs automated checks. If any **HIGH_RISK** flags are triggered (e.g., PAN/GSTIN mismatch or severe turnover anomalies), the system forcefully recommends a **REJECT** regardless of the score.
@@ -16,26 +16,28 @@ The system calculates a score out of **100** across five weighted dimensions.
 
 ### Stage 3: Eligibility Calculation
 The system calculates the maximum loan amount the borrower can afford based on:
-- **Cash Flow Limit**: Max EMI derived from Free Cash Flow (FCF).
+- **Cash Flow Limit**: Max EMI = Free Cash Flow ÷ minimum EMI coverage (1.5x), converted to a principal with a reducing-balance EMI at the policy's assumed rate (14% p.a.).
 - **Collateral Limit**: Assessed Value adjusted by the LTV (Loan-to-Value) cap for that asset type.
 
 ---
 
-## 2. Scoring Parameters (Weights)
+## 2. Scoring Parameters (Default Policy)
 
-| Dimension | Weight | Criteria |
-| :--- | :--- | :--- |
-| **Cash Flow Strength** | 30% | Ratio of Monthly Free Cash Flow to Monthly Loan Installment. |
-| **EMI Coverage (DSCR)** | 25% | Direct multiplier of cash flow vs. EMI. (Target: >1.5x) |
-| **Revenue Stability** | 20% | Coefficient of Variation (CV) of monthly bank inflows. Lower is better. |
-| **Collateral Coverage** | 15% | Value of security vs. Requested Amount. Bonus for liquid assets (FD). |
-| **Business Profile** | 10% | Business vintage (months) + Industry risk classification (Low/Med/High). |
+| Dimension | Max points | Metric | Bands → points |
+| :--- | :--- | :--- | :--- |
+| **Cash Flow Strength** | 30 | FCF ÷ (requested amount ÷ 12) | ≥2 → 30 · ≥1.5 → 25 · ≥1.2 → 20 · ≥1 → 15 · ≥0.8 → 10 · else 5 |
+| **EMI Coverage (DSCR)** | 25 | FCF ÷ EMI | ≥2.5 → 25 · ≥2 → 22 · ≥1.75 → 18 · ≥1.5 → 15 · ≥1.25 → 10 · else 5 |
+| **Revenue Stability** | 20 | Coefficient of variation of monthly inflows (lower is better) | ≤0.15 → 20 · ≤0.25 → 17 · ≤0.35 → 14 · ≤0.5 → 10 · else 5 |
+| **Collateral Coverage** | 15 | Collateral cap ÷ requested amount | ≥1.2 → 15 · ≥1 → 12 · ≥0.8 → 10 · ≥0.5 → 7 · else 4; +2 for LAP/FD; +1 for personal guarantee |
+| **Business Profile** | 10 | Vintage + industry risk | Vintage ≥60m → 5 · ≥36m → 4 · ≥24m → 3 · ≥12m → 2 · else 1; industry LOW 5 / MEDIUM 3 / HIGH 1 |
+
+Decision: **≥70 APPROVE**, **50–69 REFER**, **<50 REJECT**. A different NBFC can change any of these in its own policy file.
 
 ---
 
 ## 3. Concrete Example: SME Loan Analysis
 
-Let's look at how the engine evaluates a real-world SME application.
+The figures below are the engine's actual output for this input under `credflow-default@1.0.0`. The engine test suite checks them, so this example stays in sync with the code.
 
 ### **The Scenario**
 - **Borrower**: "GreenTech Manufacturing Units"
@@ -48,35 +50,31 @@ Let's look at how the engine evaluates a real-world SME application.
     - Avg Monthly Expenses: ₹5,50,000
     - **Free Cash Flow (FCF)**: ₹2,50,000
     - **Volatility (CV)**: 18% (0.18)
-- **Collateral**: Machinery worth ₹30,00,000 (LTV Limit: 60%)
+- **Collateral**: Machinery worth ₹30,00,000 (LTV Limit: 60%), no personal guarantee
+- **Identity**: PAN and GSTIN consistent; declared turnover ₹96L (in line with bank inflows), so fraud pre-checks are **CLEAR**
 
 ---
 
 ### **Step-by-Step Calculation**
 
-#### **1. Cash Flow Strength (Score: 30/30)**
-- Monthly Installment Burden = 25L / 12 months = ₹2.08L
-- FCF Ratio = 2.5L / 2.08L = **1.2x**
-- *Score Trigger*: Since ratio is >1.2x, it receives top marks for capacity.
+#### **1. Cash Flow Strength (20/30)**
+- Requested amount ÷ 12 = ₹2.08L
+- FCF ratio = 2.5L ÷ 2.08L = **1.2x**, which hits the ≥1.2 band → **20 points**
 
-#### **2. EMI Coverage (Score: 18/25)**
-- Projected EMI for 25L at 12% for 24mo = ~₹1.18L
-- Coverage Ratio = 2.5L (FCF) / 1.18L (EMI) = **2.11x**
-- *Score Trigger*: Since coverage is between 2.0x and 2.5x, it receives **18 points**.
+#### **2. EMI Coverage (22/25)**
+- EMI for ₹25L at 14% over 24 months = **₹1,20,032**
+- Coverage = 2.5L ÷ 1.2L = **2.08x**, in the ≥2 band → **22 points**
 
-#### **3. Revenue Stability (Score: 17/20)**
-- Volatility (CV) is 0.18.
-- *Score Trigger*: CV between 0.15 and 0.25 receives **17 points**.
+#### **3. Revenue Stability (17/20)**
+- CV 0.18 is in the ≤0.25 band → **17 points**
 
-#### **4. Collateral Coverage (Score: 12/15)**
-- Effective LTV Cap = 60% of 30L = **₹18,00,000**
-- Collateral Coverage = 18L / 25L (Requested) = **72%**
-- *Score Trigger*: High coverage but not 1:1. Base 10 + 2 for asset quality.
+#### **4. Collateral Coverage (7/15)**
+- Collateral cap = 60% of ₹30L = **₹18,00,000**
+- Coverage = 18L ÷ 25L = **0.72**, in the ≥0.5 band → **7 points** (machinery gets no preferred-asset bonus)
 
-#### **5. Business Profile (Score: 9/10)**
-- Vintage 48 months: **+4 points**
-- Low-Risk Industry (Manufacturing): **+5 points**
-- Total: **9 points**.
+#### **5. Business Profile (9/10)**
+- Vintage 48 months → **4 points**
+- Manufacturing is LOW risk → **5 points**
 
 ---
 
@@ -84,16 +82,15 @@ Let's look at how the engine evaluates a real-world SME application.
 
 | Metric | Result |
 | :--- | :--- |
-| **Total Score** | **86 / 100** |
-| **System Recommendation** | **APPROVE** (Threshold > 70) |
-| **Cash Flow Eligibility** | ₹32,00,000 |
+| **Total Score** | **75 / 100** |
+| **System Recommendation** | **APPROVE** (≥70) |
+| **Cash Flow Eligibility** | ₹34,71,291 (max EMI ₹1.67L at 14% over 24 months) |
 | **Collateral Eligibility** | ₹18,00,000 |
-| **Final Sanction Amount** | **₹20,00,000** |
+| **Recommended Amount** | **₹19,80,000** (collateral cap × 1.1 headroom) |
 
-> [!NOTE]
-> The final sanction amount is lower than the requested 25L because the system prioritized **security coverage**. Even though the cash flow could support 32L, the collateral only safely covers ~18-20L.
+The recommended amount is below the requested ₹25L because, for secured loans, the engine takes the lowest of cash-flow eligibility, collateral cap × headroom, and the requested amount.
 
-### **Explainability Snippet (Engine Output)**
-- ✅ **Approval Reasons**: "Strong EMI coverage ratio (≥2x)", "Established business (4+ years)", "Low-risk industry".
-- ⚠️ **Risk Flags**: "Collateral shortfall for full requested amount".
-- 💡 **Recommendations**: "Limit sanction to ₹20L or request additional personal guarantee".
+### **Explainability Output**
+- ✅ **Approval reasons**: "Strong EMI coverage ratio (≥2x)", "Positive free cash flow (₹2.5L/month)", "Stable cash inflows with low volatility", "Secured by MACHINERY worth ₹30.0L", "Established business with 4+ years vintage", "Low-risk industry: Manufacturing"
+- ⚠️ **Risk flags**: none
+- 💡 **Recommendations**: "Consider limiting sanction to ₹18.0L for full collateral coverage", "Recommended amount (₹19.8L) is lower than requested (₹25.0L) based on eligibility", "Bureau data not available. Proceeding with cash-flow based assessment."

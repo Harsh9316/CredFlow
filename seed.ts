@@ -1,10 +1,13 @@
 // Seed script for CredFlow sample data
 // Run with: npx tsx seed.ts
 
-import { PrismaClient } from '@prisma/client'
+import { readFileSync } from 'node:fs'
 import bcrypt from 'bcryptjs'
+import { parse } from 'yaml'
+import prisma from './lib/db'
+import { applyPolicy } from './lib/policy'
 
-const prisma = new PrismaClient()
+const readPolicy = (file: string) => parse(readFileSync(`policies/${file}`, 'utf8'))
 
 // Demo data uses a fixed-seed PRNG so every `npm run db:seed` produces the same
 // numbers, and therefore the same underwriting results.
@@ -28,11 +31,11 @@ async function main() {
   await prisma.auditLog.deleteMany()
   await prisma.approval.deleteMany()
   await prisma.creditDecision.deleteMany()
+  await prisma.creditPolicy.deleteMany()
   await prisma.collateral.deleteMany()
   await prisma.loanApplication.deleteMany()
   await prisma.financialData.deleteMany()
   await prisma.borrower.deleteMany()
-  await prisma.settings.deleteMany()
   await prisma.user.deleteMany()
   await prisma.nBFC.deleteMany()
 
@@ -109,52 +112,13 @@ async function main() {
     }
   })
 
-  await prisma.settings.create({
-    data: {
-      nbfcId: nbfc2.id,
-      approveThreshold: 75,
-      referThreshold: 55,
-      minEMICoverage: 1.75,
-      creditPolicyVersion: 'sgf-v1.0'
-    }
-  })
-
   console.log('✅ Created 5 users across 2 NBFCs')
 
-  // Create Settings
-  await prisma.settings.create({
-    data: {
-      nbfcId: nbfc1.id,
-      approveThreshold: 70,
-      referThreshold: 50,
-      minEMICoverage: 1.5,
-      maxInflowCV: 0.5,
-      minBusinessVintage: 12,
-      industryRiskBands: JSON.stringify({
-        'Manufacturing': 'LOW',
-        'IT Services': 'LOW',
-        'Healthcare': 'LOW',
-        'Retail': 'MEDIUM',
-        'Construction': 'MEDIUM',
-        'Agriculture': 'MEDIUM',
-        'Real Estate': 'HIGH',
-        'Hospitality': 'HIGH',
-        'Trading': 'MEDIUM',
-        'Logistics': 'MEDIUM',
-        'Food Processing': 'LOW'
-      }),
-      ltvLimits: JSON.stringify({
-        'LAP': 70,
-        'MACHINERY': 60,
-        'INVOICE': 80,
-        'STOCK': 50,
-        'FD': 90,
-        'NONE': 0
-      })
-    }
-  })
+  // Credit policies, from the versioned YAML files in policies/
+  await applyPolicy(nbfc1.id, readPolicy('credflow-default.yaml'))
+  await applyPolicy(nbfc2.id, readPolicy('unsecured-working-capital.yaml'))
 
-  console.log('✅ Created settings')
+  console.log('✅ Applied credit policies')
 
   // Create Borrowers
   const borrowers = await Promise.all([

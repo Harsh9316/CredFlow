@@ -61,10 +61,20 @@ credflow/
 ├── lib/
 │   ├── db.ts                         # Prisma client singleton
 │   ├── auth.ts                       # Session helpers & RBAC
-│   ├── decision-engine.ts            # Credit scoring engine
-│   └── fraud-checks.ts              # Fraud pre-checks + bureau overlay
+│   ├── session-token.ts              # Signed session tokens (edge-safe)
+│   └── policy.ts                     # Load / apply versioned credit policies
+├── packages/
+│   └── engine/                       # @credflow/engine: pure decision engine (no DB, no Next.js)
+│       ├── src/                      # policy schema, fraud checks, bureau, scoring, evaluate
+│       └── test/                     # unit, schema, policy and legacy-parity tests
+├── policies/                         # Versioned credit policies (YAML)
+├── scripts/
+│   ├── policy.ts                     # Policy CLI: validate / apply / list
+│   ├── smoke-test.ts                 # End-to-end checks against a running instance
+│   └── generate-default-policy.ts    # Syncs the engine default from credflow-default.yaml
+├── proxy.ts                          # Rejects unauthenticated requests
 ├── prisma/
-│   └── schema.prisma                 # Database schema (11 models)
+│   └── schema.prisma                 # Database schema
 ├── seed.ts                           # Database seeder
 └── docs/
     ├── TECHNICAL.md                  # This file
@@ -81,7 +91,7 @@ credflow/
 NBFC (1) ─── (*) User
      (1) ─── (*) Borrower
      (1) ─── (*) LoanApplication
-     (1) ─── (1) Settings
+     (1) ─── (*) CreditPolicy (one active)
 
 Borrower (1) ─── (*) LoanApplication
          (1) ─── (*) FinancialData
@@ -90,6 +100,8 @@ LoanApplication (1) ─── (0..1) Collateral
                 (1) ─── (0..1) CreditDecision
                 (1) ─── (0..1) Approval
                 (1) ─── (*)    AuditLog
+
+CreditPolicy (1) ─── (*) CreditDecision
 ```
 
 ### Models
@@ -105,7 +117,7 @@ LoanApplication (1) ─── (0..1) Collateral
 | `CreditDecision` | Engine output | `creditScore`, `decision`, `scoreBreakdown` (JSON) |
 | `Approval` | NBFC final decision | `finalDecision`, `sanctionedAmount`, `overrideSystem` |
 | `AuditLog` | Event trail | `action`, `details` (JSON), `timestamp` |
-| `Settings` | NBFC configuration | `approveThreshold`, `ltvLimits` (JSON), `minEMICoverage` |
+| `CreditPolicy` | Immutable, versioned credit policy per NBFC | `policyKey`, `version`, `document` (JSON), `checksum`, `isActive` |
 
 > **Note:** All enum fields are stored as `String` for SQLite compatibility.
 
@@ -135,7 +147,9 @@ LoanApplication (1) ─── (0..1) Collateral
 
 > System-assisted underwriting with analyst control. The engine does not make decisions — it produces recommendations that analysts evaluate.
 
-Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
+Lives in `packages/engine` as the standalone package `@credflow/engine`. It is pure and deterministic: `evaluateApplication(input, policy)` takes plain data and returns the full evaluation, with no database or framework dependencies. The app imports it through a TypeScript path alias, and external users can install the built package.
+
+Every number below comes from the **credit policy**. The tables show the values in `policies/credflow-default.yaml`. See [section 9](#9-credit-policies) for how policies work.
 
 ### 3-Stage Pipeline
 
@@ -208,9 +222,10 @@ Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
 
 ### Eligibility Calculations
 
-- **Cash Flow Eligible**: `(FreeCashFlow / minEMICoverage) × tenure × 0.85`
+- **EMI**: reducing-balance instalment at `affordability.annualInterestRate` (`amortized` method), or `amount / tenure` (`flat-factor` method, v0.1 behaviour)
+- **Cash Flow Eligible**: the principal whose EMI equals `FreeCashFlow / minEMICoverage` (`flat-factor`: `maxEMI × tenure × flatFactor`)
 - **Collateral Eligible**: `assessedValue × min(ltvApplied, ltvLimit) / 100`
-- **Final Recommended Amount**: `min(cashFlowEligible, collateralEligible, requestedAmount)` with adjustments for secured/unsecured
+- **Final Recommended Amount**: secured `min(cashFlowEligible, collateralEligible × collateralHeadroom, requested)`; unsecured `min(cashFlowEligible × unsecuredHaircut, requested)`; 0 if fraud pre-checks hard-stop
 
 ### Engine Output Structure
 
@@ -243,7 +258,7 @@ Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
 Every query for applications, borrowers, approvals and settings is filtered by the session's `nbfcId`. Requests for another NBFC's records return 404.
 
 ### Credit Policy
-`lib/policy.ts` loads the NBFC's `Settings` row and merges it over the engine defaults. The engine receives this policy on every run, and the policy version is stored with each decision in `calculationInputs.creditPolicyVersion`.
+`lib/policy.ts` loads the NBFC's active `CreditPolicy` (or the built-in default if none is applied) and passes it to the engine. Each decision is linked to the exact policy row via `CreditDecision.policyId`, and its id, version and checksum are also stored in `calculationInputs`.
 
 ### Role-Based Access Control
 
@@ -306,3 +321,54 @@ npm run dev
 | `analyst@credflow.io` | `Analyst@123` | ANALYST |
 | `viewer@credflow.io` | `Viewer@123` | VIEWER |
 | `admin@smegrowth.in` | `Admin@123` | ADMIN (second NBFC) |
+
+---
+
+## 9. Credit Policies
+
+A policy is a YAML document validated by the Zod schema in `packages/engine/src/policy.ts`. It controls:
+
+| Section | Controls |
+|---|---|
+| `decision` | Approve / refer thresholds |
+| `affordability` | EMI method and assumed rate, min EMI coverage, unsecured haircut, collateral headroom |
+| `scoring` | The five scorecard components: max points (must add up to 100), bands, bonuses |
+| `collateral.ltvLimits` | Maximum LTV for every collateral type |
+| `industries` | Industry → LOW / MEDIUM / HIGH, plus the band for unlisted industries |
+| `explanations` | Thresholds used to word reasons and flags |
+| `fraud` | Per-rule enable / severity / parameters, and the severity that forces REJECT |
+| `bureau` | Score-band and delinquency modifiers |
+
+Bundled policies:
+
+| File | Use |
+|---|---|
+| `credflow-default.yaml` | General MSME lending; the engine's built-in default |
+| `unsecured-working-capital.yaml` | Stricter, stability-weighted unsecured lines |
+| `secured-lap.yaml` | Collateral-led LAP scorecard |
+| `invoice-discounting.yaml` | Short-tenure receivables finance |
+| `legacy-v0.1.yaml` | Reproduces CredFlow v0.1 exactly (flat-factor EMI) |
+
+The sample policies are illustrative starting points, not credit advice. Calibrate them against your own portfolio.
+
+```bash
+npm run policy -- validate policies/*.yaml
+npm run policy -- apply policies/secured-lap.yaml --nbfc FFC
+npm run policy -- list --nbfc FFC
+```
+
+Policy versions are immutable. Applying changed content under an existing `id@version` is refused, so bump `version` to change a policy. Re-applying an older version re-activates it.
+
+---
+
+## 10. Testing & CI
+
+| Command | What it checks |
+|---|---|
+| `npm test` | Engine unit tests, policy schema validation, bundled policies, and **legacy parity**: 500 recorded v0.1 decisions reproduced field-for-field under `legacy-v0.1.yaml` |
+| `npm run typecheck` | App and engine TypeScript |
+| `npm run lint` | ESLint |
+| `npm run smoke` | Against a running, freshly seeded instance: auth, forged/tampered sessions, roles, tenant isolation, policy-linked decisions |
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, tests, policy validation, a default-policy drift check and both builds. It then runs the smoke test against a production build, and builds and boots the Docker image.
+
