@@ -3,7 +3,7 @@
 # Illustrative starting point only: calibrate against your own portfolio before use.
 id: secured-lap
 name: Secured loan against property
-version: 1.0.0
+version: 1.1.0
 description: Collateral-led scorecard for LAP and other hard-asset secured loans.
 
 decision:
@@ -104,6 +104,11 @@ fraud:
     excessiveBankFlow: { severity: WARNING, maxBankToTurnoverRatio: 3 }
     newEntityLargeLoan: { severity: WARNING, maxVintageMonths: 6, amountAbove: 2500000 }
     loanExceedsTurnover: { severity: WARNING }
+
+approvals:
+  checkerRequiredAbove: 5000000
+  checkerRequiredForOverrides: true
+  checkerRoles: [ADMIN]
 
 bureau:
   fraudAlertModifier: -100

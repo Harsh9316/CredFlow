@@ -10,7 +10,11 @@ type DecisionPanelProps = {
   systemDecision?: string
   recommendedAmount?: number
   userRole: string
+  checker?: { pending: boolean; reasons: string[]; makerName: string; canCheck: boolean; blockedReason: string | null } | null
+  pendingSanction?: { amount: number; tenure: number; interestRate: number; overrideReason: string | null } | null
 }
+
+const formatINR = (n: number) => `₹${(n / 100000).toFixed(1)}L`
 
 export default function DecisionPanel({ 
   applicationId, 
@@ -18,7 +22,9 @@ export default function DecisionPanel({
   hasDecision, 
   systemDecision,
   recommendedAmount,
-  userRole 
+  userRole,
+  checker,
+  pendingSanction,
 }: DecisionPanelProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -34,6 +40,7 @@ export default function DecisionPanel({
   const [processingFee, setProcessingFee] = useState('2.0')
   const [conditions, setConditions] = useState('')
   const [overrideReason, setOverrideReason] = useState('')
+  const [checkerRemarks, setCheckerRemarks] = useState('')
 
   const runDecisionEngine = async () => {
     setLoading(true)
@@ -69,6 +76,7 @@ export default function DecisionPanel({
         body.conditions = conditions
       }
       if (overrideReason) body.overrideReason = overrideReason
+      if (checkerRemarks && (selectedAction === 'CONFIRM' || selectedAction === 'RETURN')) body.remarks = checkerRemarks
 
       const res = await fetch(`/api/applications/${applicationId}/process`, {
         method: 'POST',
@@ -80,7 +88,14 @@ export default function DecisionPanel({
         setError(data.error || 'Failed to process')
         return
       }
-      setSuccess(`Application ${selectedAction === 'APPROVE' ? 'approved & sanctioned' : selectedAction === 'REJECT' ? 'rejected' : 'referred for review'}`)
+      const messages: Record<string, string> = {
+        SANCTIONED: 'Application sanctioned',
+        PENDING_APPROVAL: `Submitted for checker approval: ${(data.checkerReasons || []).join('; ')}`,
+        REJECTED: 'Application rejected',
+        REFERRED: 'Application referred for review',
+        RETURNED: 'Sanction returned to the maker for review',
+      }
+      setSuccess(messages[data.outcome] || 'Done')
       setTimeout(() => router.refresh(), 1500)
     } catch {
       setError('Something went wrong')
@@ -102,6 +117,46 @@ export default function DecisionPanel({
         <div style={{textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-muted)'}}>
           <p>This application has been <strong>{currentStatus.toLowerCase()}</strong>. No further actions available.</p>
         </div>
+      </div>
+    )
+  }
+
+  if (currentStatus === 'PENDING_APPROVAL' && checker?.pending) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Checker Approval</h3>
+          <span className="badge badge-warning">Awaiting checker</span>
+        </div>
+        {error && <div className="alert alert-danger mb-4"><span>{error}</span></div>}
+        {success && <div className="alert alert-success mb-4"><span>{success}</span></div>}
+        <p style={{fontSize: '0.875rem', marginBottom: 'var(--space-3)'}}>
+          <strong>{checker.makerName}</strong> approved a sanction
+          {pendingSanction && <> of <strong>{formatINR(pendingSanction.amount)}</strong> for {pendingSanction.tenure} months at {pendingSanction.interestRate}% p.a.</>}.
+          A second approver is required because:
+        </p>
+        <ul style={{fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 'var(--space-4)', paddingLeft: 'var(--space-5)'}}>
+          {checker.reasons.map(r => <li key={r}>{r}</li>)}
+          {pendingSanction?.overrideReason && <li>Maker&apos;s override reason: {pendingSanction.overrideReason}</li>}
+        </ul>
+        {checker.canCheck ? (
+          <>
+            <div className="form-group" style={{marginBottom: 'var(--space-3)'}}>
+              <label className="form-label" htmlFor="checker-remarks">Remarks (required to return)</label>
+              <textarea id="checker-remarks" className="form-input" rows={2} value={checkerRemarks} onChange={e => setCheckerRemarks(e.target.value)} />
+            </div>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--space-3)'}}>
+              <button className="btn btn-primary" style={{background: 'var(--accent-green)', borderColor: 'var(--accent-green)'}} disabled={loading} onClick={() => processAction('CONFIRM')}>
+                ✓ Confirm Sanction
+              </button>
+              <button className="btn btn-ghost" style={{borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)'}} disabled={loading || !checkerRemarks.trim()} onClick={() => processAction('RETURN')}>
+                ↩ Return to Maker
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-muted" style={{fontSize: '0.875rem'}}>{checker.blockedReason}</p>
+        )}
       </div>
     )
   }

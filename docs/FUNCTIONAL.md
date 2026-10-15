@@ -291,11 +291,12 @@ Policies are changed by applying a new version with `npm run policy -- apply <fi
 ## 4. Workflow: End-to-End Loan Processing
 
 ```
-1. ANALYST creates New Application (4-step form)
+1. ANALYST creates New Application (4-step form), or an integrated system creates it via the API
    └→ Status: APPLIED
 
 2. ANALYST runs Underwriting Engine
-   ├→ Stage 1: Fraud pre-checks (PAN/GSTIN, inflow spikes, turnover mismatch...)
+   ├→ (Optional) Data connectors: bureau report, GSTIN status, PAN verification
+   ├→ Stage 1: Fraud pre-checks (PAN/GSTIN, GSTIN status, PAN verification, inflow spikes, turnover mismatch...)
    │   └→ If HIGH_RISK: auto-reject recommendation
    ├→ Stage 2: Bureau overlay (optional negative filter)
    │   └→ Score modifier applied (-10 to +5)
@@ -303,14 +304,21 @@ Policies are changed by applying a new version with `npm run policy -- apply <fi
        └→ Recommendation: APPROVE / REFER / REJECT
        └→ Status: UNDER_REVIEW
 
-3. ANALYST reviews recommendation + fraud checks + risk flags
-   ├→ If APPROVE: Enter sanction details → Status: SANCTIONED
+3. ANALYST (maker) reviews recommendation + fraud checks + risk flags
+   ├→ If APPROVE: Enter sanction details
+   │   ├→ Within the policy's single-approver limit, not an override → Status: SANCTIONED
+   │   └→ Above the limit, or overriding the system (per policy) → Status: PENDING_APPROVAL
    ├→ If REJECT: Confirm rejection → Status: REJECTED
-   │   └→ If overriding system APPROVE: override reason mandatory
    └→ If REFER: Send for additional review → stays UNDER_REVIEW
+   (Any override of the system recommendation requires a reason)
 
-4. All actions logged in Audit Trail with user, timestamp, details
-5. Portfolio Risk Governance monitors concentration automatically
+4. CHECKER (a different user, in a role the policy allows; ADMIN by default)
+   ├→ CONFIRM → Status: SANCTIONED (maker and checker both recorded)
+   └→ RETURN with remarks → Status: UNDER_REVIEW
+
+5. All actions logged in the append-only Audit Trail (user or API key, timestamp, details)
+6. Each step emits an event (webhooks / GET /api/v1/events) for downstream systems
+7. Portfolio Risk Governance monitors concentration automatically
 ```
 
 ---
@@ -319,8 +327,8 @@ Policies are changed by applying a new version with `npm run policy -- apply <fi
 
 | Entity | Count | Details |
 |--------|-------|---------|
-| NBFC | 1 | First Finance Corporation |
-| Users | 3 | Admin, Analyst, Viewer |
+| NBFC | 2 | FinFirst Capital, SME Growth Finance |
+| Users | 5 | FinFirst: Admin, 2 Analysts, Viewer; SME Growth: Admin |
 | Borrowers | 8 | Various industries |
 | Loan Applications | 9 | Mix of statuses |
 | Financial Data | 8 | Bank statement analysis for each borrower |
@@ -334,4 +342,6 @@ Policies are changed by applying a new version with `npm run policy -- apply <fi
 |-------|----------|------|
 | `admin@credflow.io` | `Admin@123` | NBFC Admin |
 | `analyst@credflow.io` | `Analyst@123` | Credit Analyst |
+| `analyst2@credflow.io` | `Analyst@123` | Credit Analyst |
 | `viewer@credflow.io` | `Viewer@123` | Viewer |
+| `admin@smegrowth.in` | `Admin@123` | NBFC Admin (SME Growth Finance) |

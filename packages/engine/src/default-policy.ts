@@ -4,7 +4,7 @@ import type { CreditPolicyInput } from './policy'
 export const DEFAULT_POLICY_INPUT: CreditPolicyInput = {
   "id": "credflow-default",
   "name": "CredFlow default MSME policy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "General-purpose cash-flow-first scorecard for MSME lending.",
   "decision": {
     "approveThreshold": 70,
@@ -215,6 +215,13 @@ export const DEFAULT_POLICY_INPUT: CreditPolicyInput = {
         "severity": "WARNING"
       }
     }
+  },
+  "approvals": {
+    "checkerRequiredAbove": 2500000,
+    "checkerRequiredForOverrides": true,
+    "checkerRoles": [
+      "ADMIN"
+    ]
   },
   "bureau": {
     "fraudAlertModifier": -100,

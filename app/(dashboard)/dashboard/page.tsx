@@ -99,6 +99,7 @@ function getStatusBadge(status: string) {
     APPLIED: { class: 'badge-primary', label: 'Applied' },
     UNDER_REVIEW: { class: 'badge-warning', label: 'Under Review' },
     PENDING_DOCS: { class: 'badge-gray', label: 'Pending Docs' },
+    PENDING_APPROVAL: { class: 'badge-warning', label: 'Awaiting Checker' },
     APPROVED: { class: 'badge-success', label: 'Approved' },
     REJECTED: { class: 'badge-danger', label: 'Rejected' },
     SANCTIONED: { class: 'badge-purple', label: 'Sanctioned' },

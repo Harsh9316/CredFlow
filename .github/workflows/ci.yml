@@ -16,6 +16,20 @@ jobs:
   check:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      # Only used as a shadow database to check migrations against the schema
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: credflow
+          POSTGRES_PASSWORD: credflow
+          POSTGRES_DB: shadow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U credflow"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,6 +41,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: Prisma schema and migrations are in sync
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW_DATABASE_URL"
+        env:
+          SHADOW_DATABASE_URL: postgresql://credflow:credflow@localhost:5432/shadow
       - name: Validate bundled credit policies
         run: npm run policy -- validate policies/*.yaml
       - name: Engine default policy is in sync with policies/credflow-default.yaml
@@ -42,10 +60,29 @@ jobs:
     name: End-to-end smoke test
     runs-on: ubuntu-latest
     needs: check
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: credflow
+          POSTGRES_PASSWORD: credflow
+          POSTGRES_DB: credflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U credflow"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     env:
-      DATABASE_URL: file:./ci.db
+      DATABASE_URL: postgresql://credflow:credflow@localhost:5432/credflow
       SESSION_SECRET: ci-smoke-test-secret-0123456789abcdef0123
       BASE_URL: http://localhost:3000
+      # The smoke test runs a local webhook receiver, and exercises the mock data providers
+      WEBHOOK_ALLOW_PRIVATE_URLS: "true"
+      CONNECTOR_BUREAU: mock
+      CONNECTOR_GST: mock
+      CONNECTOR_KYC: mock
+      CONNECTOR_BANK_DATA: mock
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

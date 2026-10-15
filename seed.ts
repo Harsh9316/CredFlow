@@ -27,17 +27,12 @@ const hash = (password: string) => bcrypt.hashSync(password, 12)
 async function main() {
   console.log('🌱 Seeding CredFlow database...')
 
-  // Clean existing data
-  await prisma.auditLog.deleteMany()
-  await prisma.approval.deleteMany()
-  await prisma.creditDecision.deleteMany()
-  await prisma.creditPolicy.deleteMany()
-  await prisma.collateral.deleteMany()
-  await prisma.loanApplication.deleteMany()
-  await prisma.financialData.deleteMany()
-  await prisma.borrower.deleteMany()
-  await prisma.user.deleteMany()
-  await prisma.nBFC.deleteMany()
+  // Wipe all data. TRUNCATE (not DELETE) because the audit log is append-only.
+  const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+    SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename <> '_prisma_migrations'`
+  if (tables.length > 0) {
+    await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map(t => `"${t.tablename}"`).join(', ')} CASCADE`)
+  }
 
   // Create NBFCs
   const nbfc1 = await prisma.nBFC.create({
@@ -494,6 +489,7 @@ async function main() {
     })
   ])
 
+  await prisma.nBFC.update({ where: { id: nbfc1.id }, data: { applicationSeq: applications.length } })
   console.log(`✅ Created ${applications.length} loan applications`)
 
   // Create Collateral for some applications

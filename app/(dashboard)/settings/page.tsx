@@ -19,6 +19,8 @@ const fraudRuleLabels: Record<keyof CreditPolicy['fraud']['rules'], string> = {
   excessiveBankFlow: 'Bank inflows far above declared turnover',
   newEntityLargeLoan: 'New entity, large loan',
   loanExceedsTurnover: 'Loan exceeds annual turnover',
+  gstinNotActive: 'GSTIN not active (needs GST connector)',
+  panNotVerified: 'PAN not verified (needs KYC connector)',
 }
 
 function describeRuleParams(key: string, rule: Record<string, unknown>): string {
@@ -241,6 +243,32 @@ export default async function SettingsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Maker-checker */}
+      <div className="card settings-section">
+        <div className="card-header">
+          <h3 className="card-title">Sanction Approvals (Maker-Checker)</h3>
+        </div>
+        <div className="settings-grid">
+          <div className="setting-item">
+            <div className="setting-label">Second approver above</div>
+            <div className="setting-value">
+              {policy.approvals.checkerRequiredAbove === null ? 'Never' : `₹${(policy.approvals.checkerRequiredAbove / 100000).toFixed(1)}L`}
+            </div>
+            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Sanctions above this need a checker</p>
+          </div>
+          <div className="setting-item">
+            <div className="setting-label">Overrides need a checker</div>
+            <div className="setting-value">{policy.approvals.checkerRequiredForOverrides ? 'Yes' : 'No'}</div>
+            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Approving against the system recommendation</p>
+          </div>
+          <div className="setting-item">
+            <div className="setting-label">Checker roles</div>
+            <div className="setting-value" style={{fontSize: '1.1rem'}}>{policy.approvals.checkerRoles.join(', ')}</div>
+            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Always a different user from the maker</p>
+          </div>
         </div>
       </div>
 

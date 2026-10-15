@@ -3,7 +3,7 @@
 # Illustrative starting point only: calibrate against your own portfolio before use.
 id: unsecured-working-capital
 name: Unsecured working capital
-version: 1.0.0
+version: 1.1.0
 description: Short-tenure unsecured lines where cash-flow quality carries the decision.
 
 decision:
@@ -103,6 +103,11 @@ fraud:
     excessiveBankFlow: { severity: WARNING, maxBankToTurnoverRatio: 3 }
     newEntityLargeLoan: { severity: WARNING, maxVintageMonths: 6, amountAbove: 2500000 }
     loanExceedsTurnover: { severity: WARNING }
+
+approvals:
+  checkerRequiredAbove: 1000000
+  checkerRequiredForOverrides: true
+  checkerRoles: [ADMIN]
 
 bureau:
   fraudAlertModifier: -100

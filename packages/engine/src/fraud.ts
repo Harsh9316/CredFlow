@@ -91,6 +91,25 @@ export function runFraudChecks(input: ApplicationInput, policy: CreditPolicy): F
     })
   }
 
+  const v = input.verifications
+  if (rules.gstinNotActive.enabled && v?.gstinStatus && v.gstinStatus !== 'ACTIVE') {
+    flags.push({
+      code: 'FRAUD_GSTIN_NOT_ACTIVE',
+      severity: rules.gstinNotActive.severity,
+      description: `GSTIN ${borrower.gstin ?? ''} is ${v.gstinStatus.replace('_', ' ').toLowerCase()} on the GST network`.replace('  ', ' '),
+      recommendation: 'Confirm the business is operating. Do not proceed on a cancelled or suspended registration.',
+    })
+  }
+
+  if (rules.panNotVerified.enabled && v && v.panValid === false) {
+    flags.push({
+      code: 'FRAUD_PAN_NOT_VERIFIED',
+      severity: rules.panNotVerified.severity,
+      description: `PAN ${borrower.pan ?? ''} could not be verified with the issuing authority`.replace('  ', ' '),
+      recommendation: 'Obtain a fresh copy of the PAN card and re-verify before proceeding.',
+    })
+  }
+
   const hardStop = policy.fraud.hardStopSeverity
   const blocking = flags.filter(f => atLeast(f.severity, hardStop)).length
   const review = flags.filter(f => !atLeast(f.severity, hardStop) && f.severity !== 'INFO').length

@@ -1,17 +1,44 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: credflow
+      POSTGRES_PASSWORD: credflow
+      POSTGRES_DB: credflow
+    ports:
+      # Exposed so `npm run dev` on the host can use this database too
+      - "5432:5432"
+    volumes:
+      - credflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U credflow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   credflow:
     build:
       context: .
       args:
         NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS: "true"
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
+      DATABASE_URL: postgresql://credflow:credflow@db:5432/credflow
       # Leave empty to auto-generate one stored in the data volume.
       SESSION_SECRET: ${SESSION_SECRET:-}
       SEED_DEMO_DATA: "true"
+      # Mock data providers so the demo shows bureau, GST and PAN checks. Use "none" or a real provider in production.
+      CONNECTOR_BUREAU: mock
+      CONNECTOR_GST: mock
+      CONNECTOR_KYC: mock
+      CONNECTOR_BANK_DATA: mock
     volumes:
       - credflow-data:/data
 
 volumes:
+  credflow-db:
   credflow-data:

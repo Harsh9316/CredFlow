@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import DecisionPanel from '@/components/DecisionPanel'
 import { requirePageSession } from '@/lib/auth'
+import { getActivePolicy } from '@/lib/policy'
+import { canActAsChecker, parsePolicy } from '@credflow/engine'
 
 async function getApplication(id: string, nbfcId: string) {
   const application = await prisma.loanApplication.findFirst({
@@ -11,11 +13,17 @@ async function getApplication(id: string, nbfcId: string) {
       borrower: true,
       collateral: true,
       creditDecision: true,
-      approval: true,
+      approval: {
+        include: {
+          user: { select: { name: true } },
+          checker: { select: { name: true } }
+        }
+      },
       auditLogs: {
         orderBy: { timestamp: 'desc' },
         include: {
-          user: { select: { name: true } }
+          user: { select: { name: true } },
+          apiKey: { select: { name: true, prefix: true } }
         }
       }
     }
@@ -56,6 +64,7 @@ function getStatusBadge(status: string) {
     APPLIED: { class: 'badge-primary', label: 'Applied' },
     UNDER_REVIEW: { class: 'badge-warning', label: 'Under Review' },
     PENDING_DOCS: { class: 'badge-gray', label: 'Pending Docs' },
+    PENDING_APPROVAL: { class: 'badge-warning', label: 'Awaiting Checker' },
     APPROVED: { class: 'badge-success', label: 'Approved' },
     REJECTED: { class: 'badge-danger', label: 'Rejected' },
     SANCTIONED: { class: 'badge-purple', label: 'Sanctioned' },
@@ -120,6 +129,27 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
 
   const { borrower, collateral, creditDecision, approval, financialData, auditLogs } = application
 
+  // Maker-checker: approval rules come from the policy the decision was evaluated under
+  let checker: { pending: boolean; reasons: string[]; makerName: string; canCheck: boolean; blockedReason: string | null } | null = null
+  if (approval?.status === 'PENDING_CHECKER') {
+    const decisionPolicy = creditDecision?.policyId
+      ? await prisma.creditPolicy.findFirst({ where: { id: creditDecision.policyId, nbfcId: session.nbfcId } })
+      : null
+    const policy = decisionPolicy ? parsePolicy(JSON.parse(decisionPolicy.document)) : (await getActivePolicy(session.nbfcId)).policy
+    const canCheck = canActAsChecker(policy, { userId: session.id, role: session.role }, approval.approvedBy)
+    checker = {
+      pending: true,
+      reasons: Array.isArray(approval.checkerReasons) ? (approval.checkerReasons as string[]) : [],
+      makerName: approval.user.name,
+      canCheck,
+      blockedReason: canCheck
+        ? null
+        : approval.approvedBy === session.id
+          ? 'You submitted this sanction, so a different user must check it.'
+          : `Only ${policy.approvals.checkerRoles.join(' or ')} users can act as checker.`,
+    }
+  }
+
   // Parse JSON fields
   const scoreBreakdown = creditDecision?.scoreBreakdown ? JSON.parse(creditDecision.scoreBreakdown) : null
   const approvalReasons = creditDecision?.approvalReasons ? JSON.parse(creditDecision.approvalReasons) : []
@@ -182,7 +212,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
               </div>
               <div>
                 <div className="text-xs text-muted mb-2">Location</div>
-                <div>{borrower.city}, {borrower.state}</div>
+                <div>{[borrower.city, borrower.state].filter(Boolean).join(', ') || '—'}</div>
               </div>
               <div>
                 <div className="text-xs text-muted mb-2">GSTIN</div>
@@ -350,6 +380,13 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
             systemDecision={creditDecision?.decision}
             recommendedAmount={creditDecision?.finalRecommendedAmt}
             userRole={session.role}
+            checker={checker}
+            pendingSanction={approval?.status === 'PENDING_CHECKER' ? {
+              amount: approval.sanctionedAmount ?? 0,
+              tenure: approval.sanctionedTenure ?? 0,
+              interestRate: approval.interestRate ?? 0,
+              overrideReason: approval.overrideSystem ? approval.overrideReason : null,
+            } : null}
           />
 
           {/* Fraud Pre-Check Results */}
@@ -517,11 +554,13 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
           )}
 
           {/* Approval / Sanction Details */}
-          {approval && (
+          {approval && approval.finalDecision === 'APPROVE' && (
             <div className="card">
               <div className="card-header">
                 <h3 className="card-title">Sanction Details</h3>
-                <span className="badge badge-success">Sanctioned</span>
+                {approval.status === 'CONFIRMED' && <span className="badge badge-success">Sanctioned</span>}
+                {approval.status === 'PENDING_CHECKER' && <span className="badge badge-warning">Awaiting checker</span>}
+                {approval.status === 'RETURNED' && <span className="badge badge-gray">Returned by checker</span>}
               </div>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)'}}>
                 <div>
@@ -538,8 +577,22 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
                 </div>
                 <div>
                   <div className="text-xs text-muted mb-2">Processing Fee</div>
-                  <div style={{fontWeight: 600}}>{formatAmount(approval.processingFee || 0)}</div>
+                  <div style={{fontWeight: 600}}>{approval.processingFee ?? 0}%</div>
                 </div>
+                <div>
+                  <div className="text-xs text-muted mb-2">Maker</div>
+                  <div style={{fontWeight: 600}}>{approval.user.name}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted mb-2">Checker</div>
+                  <div style={{fontWeight: 600}}>{approval.checker?.name ?? (approval.status === 'PENDING_CHECKER' ? 'Pending' : 'Not required')}</div>
+                </div>
+                {approval.checkerRemarks && (
+                  <div style={{gridColumn: 'span 2'}}>
+                    <div className="text-xs text-muted mb-2">Checker remarks</div>
+                    <div>{approval.checkerRemarks}</div>
+                  </div>
+                )}
                 {approval.overrideSystem && (
                   <div style={{gridColumn: 'span 2'}}>
                     <div className="alert alert-warning">
@@ -567,7 +620,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
                 <h3 className="card-title">Audit Trail</h3>
               </div>
               <div className="timeline">
-                {auditLogs.map((log: { action: string; timestamp: Date; details: string | null; user?: { name: string } | null }, i: number) => {
+                {auditLogs.map((log, i) => {
                   const details = log.details ? JSON.parse(log.details) : {}
                   return (
                     <div key={i} className={`timeline-item ${log.action.includes('APPROVED') || log.action.includes('SANCTIONED') ? 'success' : log.action.includes('REJECTED') ? 'danger' : ''}`}>
@@ -575,7 +628,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
                       <div className="timeline-content">
                         <div className="timeline-time">{formatDate(log.timestamp)}</div>
                         <div className="timeline-title">{log.action.replace(/_/g, ' ')}</div>
-                        <div className="timeline-desc">by {log.user?.name} • {details.message || ''}</div>
+                        <div className="timeline-desc">by {log.user?.name ?? (log.apiKey ? `API key "${log.apiKey.name}" (cf_${log.apiKey.prefix}_…)` : 'system')} • {details.message || ''}</div>
                       </div>
                     </div>
                   )

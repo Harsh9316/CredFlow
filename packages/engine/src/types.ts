@@ -34,6 +34,13 @@ export type ApplicationInput = {
     hasDelinquency?: boolean
     hasFraudAlert?: boolean
   } | null
+  /** Results from GST / PAN verification providers, when available. */
+  verifications?: {
+    gstinStatus?: 'ACTIVE' | 'CANCELLED' | 'SUSPENDED' | 'NOT_FOUND'
+    panValid?: boolean
+    /** 0-1 similarity between the name on the PAN and the business's legal name. */
+    panNameMatch?: number
+  } | null
 }
 
 export type Decision = 'APPROVE' | 'REFER' | 'REJECT'

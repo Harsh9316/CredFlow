@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_POLICY,
   amortizedEMI,
+  canActAsChecker,
+  checkerRequirements,
   evaluateApplication,
   parsePolicy,
   principalForEMI,
@@ -58,7 +60,7 @@ describe('evaluateApplication', () => {
     expect(r.fraud.riskLevel).toBe('CLEAR')
     expect(r.approvalReasons).toContain('Low-risk industry: Manufacturing')
     expect(r.approvalReasons).toContain('Personal guarantee provided')
-    expect(r.policy).toEqual({ id: 'credflow-default', version: '1.0.0' })
+    expect(r.policy).toEqual({ id: 'credflow-default', version: '1.1.0' })
     expect(r.scoreBreakdown.total).toBe(
       r.scoreBreakdown.cashFlowScore + r.scoreBreakdown.coverageScore + r.scoreBreakdown.stabilityScore +
       r.scoreBreakdown.collateralScore + r.scoreBreakdown.profileScore
@@ -169,5 +171,45 @@ describe('docs/UNDERWRITING_EXPLAINED.md worked example', () => {
     expect(r.finalRecommendedAmt).toBe(1_980_000)
     expect(r.riskFlags).toEqual([])
     expect(r.fraud.riskLevel).toBe('CLEAR')
+  })
+})
+
+describe('maker-checker', () => {
+  it('requires a checker above the amount limit and for overrides', () => {
+    // credflow-default: checker above ₹25L and for overrides
+    expect(checkerRequirements(DEFAULT_POLICY, { sanctionedAmount: 2_500_000, isOverride: false })).toEqual([])
+    expect(checkerRequirements(DEFAULT_POLICY, { sanctionedAmount: 2_500_001, isOverride: false })).toEqual([
+      'Sanction of ₹25.0L exceeds the single-approver limit of ₹25.0L',
+    ])
+    expect(checkerRequirements(DEFAULT_POLICY, { sanctionedAmount: 100_000, isOverride: true })).toEqual([
+      'Decision overrides the system recommendation',
+    ])
+  })
+
+  it('defaults to no checker when a policy has no approvals section', () => {
+    const legacy = loadPolicy('legacy-v0.1.yaml')
+    expect(legacy.approvals).toEqual({ checkerRequiredAbove: null, checkerRequiredForOverrides: false, checkerRoles: ['ADMIN'] })
+    expect(checkerRequirements(legacy, { sanctionedAmount: 1e9, isOverride: true })).toEqual([])
+  })
+
+  it('the checker must be a different user with an allowed role', () => {
+    expect(canActAsChecker(DEFAULT_POLICY, { userId: 'b', role: 'ADMIN' }, 'a')).toBe(true)
+    expect(canActAsChecker(DEFAULT_POLICY, { userId: 'a', role: 'ADMIN' }, 'a')).toBe(false)
+    expect(canActAsChecker(DEFAULT_POLICY, { userId: 'b', role: 'ANALYST' }, 'a')).toBe(false)
+    expect(canActAsChecker(DEFAULT_POLICY, { userId: 'b', role: 'VIEWER' }, 'a')).toBe(false)
+  })
+})
+
+describe('verification-based fraud rules', () => {
+  it('flag a cancelled GSTIN and an unverified PAN as critical', () => {
+    const r = evaluateApplication({ ...healthy, verifications: { gstinStatus: 'CANCELLED', panValid: false } }, DEFAULT_POLICY)
+    expect(r.fraud.flags.map(f => f.code)).toEqual(['FRAUD_GSTIN_NOT_ACTIVE', 'FRAUD_PAN_NOT_VERIFIED'])
+    expect(r.fraud.flags[0].description).toBe('GSTIN 27ABCDE1234F1Z5 is cancelled on the GST network')
+    expect(r.decision).toBe('REJECT')
+  })
+
+  it('do nothing when verification passes or was not performed', () => {
+    expect(evaluateApplication({ ...healthy, verifications: { gstinStatus: 'ACTIVE', panValid: true } }, DEFAULT_POLICY).fraud.flags).toEqual([])
+    expect(evaluateApplication(healthy, DEFAULT_POLICY).fraud.flags).toEqual([])
   })
 })

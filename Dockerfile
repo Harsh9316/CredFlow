@@ -19,7 +19,6 @@ ENV NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS=$NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS
 RUN SESSION_SECRET=build-time-placeholder-secret-not-used-at-runtime npm run build
 
 ENV NODE_ENV=production \
-    DATABASE_URL=file:/data/credflow.db \
     PORT=3000
 
 VOLUME /data

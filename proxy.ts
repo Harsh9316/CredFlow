@@ -19,6 +19,8 @@ export const config = {
     '/applications/:path*',
     '/portfolio/:path*',
     '/settings/:path*',
-    '/api/applications/:path*'
+    '/developers/:path*',
+    '/api/applications/:path*',
+    '/api/admin/:path*'
   ]
 }
