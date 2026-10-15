@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "NBFC" ADD COLUMN     "applicationSeq" INTEGER NOT NULL DEFAULT 0;

@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+if [ -z "$DATABASE_URL" ]; then
+  echo "DATABASE_URL must be set (postgresql://...)" >&2
+  exit 1
+fi
+
 # Generate and persist a session secret if none was provided, so a demo
 # starts with one command and sessions survive container restarts.
 if [ -z "$SESSION_SECRET" ]; then
@@ -11,12 +16,11 @@ if [ -z "$SESSION_SECRET" ]; then
   export SESSION_SECRET
 fi
 
-npx prisma db push --skip-generate
+npx prisma migrate deploy
 
-# Load demo data only on first start; the seed script wipes existing rows.
-if [ "${SEED_DEMO_DATA:-true}" = "true" ] && [ ! -f /data/.seeded ]; then
-  npx tsx seed.ts
-  touch /data/.seeded
+# Load demo data only into an empty database; the seed script wipes existing rows.
+if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
+  npx tsx scripts/seed-if-empty.ts
 fi
 
 exec npx next start -p "${PORT:-3000}"

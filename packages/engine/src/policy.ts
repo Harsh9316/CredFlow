@@ -126,8 +126,23 @@ export const CreditPolicySchema = z
         excessiveBankFlow: fraudRule({ maxBankToTurnoverRatio: z.number().positive() }),
         newEntityLargeLoan: fraudRule({ maxVintageMonths: z.number().int().min(0), amountAbove: z.number().min(0) }),
         loanExceedsTurnover: fraudRule({}),
+        // Only evaluated when verification results are supplied (see ApplicationInput.verifications)
+        gstinNotActive: fraudRule({}).default({ enabled: true, severity: 'CRITICAL' }),
+        panNotVerified: fraudRule({}).default({ enabled: true, severity: 'CRITICAL' }),
       }),
     }),
+
+    // Maker-checker: when a second person must confirm a sanction before it takes effect.
+    approvals: z
+      .object({
+        // Sanctioned amount above which a checker is required (null = never on amount alone).
+        checkerRequiredAbove: z.number().min(0).nullable().default(null),
+        // Require a checker whenever the analyst's decision differs from the system recommendation.
+        checkerRequiredForOverrides: z.boolean().default(false),
+        // Roles allowed to act as checker. The checker must always be a different user from the maker.
+        checkerRoles: z.array(z.enum(['ADMIN', 'ANALYST'])).min(1).default(['ADMIN']),
+      })
+      .default({ checkerRequiredAbove: null, checkerRequiredForOverrides: false, checkerRoles: ['ADMIN'] }),
 
     bureau: z.object({
       fraudAlertModifier: z.number(),

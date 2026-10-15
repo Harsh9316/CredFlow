@@ -20,7 +20,7 @@
 |-------|-----------|---------|
 | **Framework** | Next.js (App Router) | 16.x |
 | **Language** | TypeScript | 5.x |
-| **Database** | SQLite | 3.x |
+| **Database** | PostgreSQL (migrations in `prisma/migrations`) | 16.x |
 | **ORM** | Prisma | 5.x |
 | **Styling** | Vanilla CSS (CSS Variables) | — |
 | **Runtime** | Node.js | 22.x |
@@ -62,7 +62,16 @@ credflow/
 │   ├── db.ts                         # Prisma client singleton
 │   ├── auth.ts                       # Session helpers & RBAC
 │   ├── session-token.ts              # Signed session tokens (edge-safe)
-│   └── policy.ts                     # Load / apply versioned credit policies
+│   ├── policy.ts                     # Load / apply versioned credit policies
+│   ├── services/                     # Use cases shared by dashboard routes and the public API
+│   │   ├── applications.ts           # create, underwrite, decide (maker-checker), serialize
+│   │   ├── events.ts                 # Domain events → webhook outbox
+│   │   └── errors.ts, actor.ts
+│   ├── connectors/                   # Bureau / GST / KYC / bank-data interfaces + mocks
+│   ├── api-keys.ts, api-v1.ts        # API key auth and /api/v1 plumbing
+│   ├── idempotency.ts                # Idempotency-Key handling
+│   ├── webhooks.ts                   # Signing, SSRF checks, delivery with retries
+│   └── openapi.ts                    # OpenAPI 3.1 document
 ├── packages/
 │   └── engine/                       # @credflow/engine: pure decision engine (no DB, no Next.js)
 │       ├── src/                      # policy schema, fraud checks, bureau, scoring, evaluate
@@ -102,6 +111,11 @@ LoanApplication (1) ─── (0..1) Collateral
                 (1) ─── (*)    AuditLog
 
 CreditPolicy (1) ─── (*) CreditDecision
+
+NBFC (1) ─── (*) ApiKey ─── (*) AuditLog
+     (1) ─── (*) WebhookEndpoint (1) ─── (*) WebhookDelivery (*) ─── (1) WebhookEvent
+     (1) ─── (*) WebhookEvent
+     (1) ─── (*) IdempotencyKey
 ```
 
 ### Models
@@ -115,11 +129,18 @@ CreditPolicy (1) ─── (*) CreditDecision
 | `FinancialData` | Bank statement metrics | `avgMonthlyInflow`, `freeCashFlow`, `inflowVolatility` |
 | `Collateral` | Security details | `collateralType`, `assessedValue`, `ltv`, `collateralCap` |
 | `CreditDecision` | Engine output | `creditScore`, `decision`, `scoreBreakdown` (JSON) |
-| `Approval` | NBFC final decision | `finalDecision`, `sanctionedAmount`, `overrideSystem` |
-| `AuditLog` | Event trail | `action`, `details` (JSON), `timestamp` |
+| `Approval` | NBFC final decision with maker-checker | `finalDecision`, `sanctionedAmount`, `overrideSystem`, `status` (CONFIRMED / PENDING_CHECKER / RETURNED), `approvedBy` (maker), `checkedBy` |
+| `AuditLog` | Append-only event trail (DB trigger blocks UPDATE/DELETE) | `action`, `details` (JSON), `userId` or `apiKeyId`, `timestamp` |
+| `ApiKey` | Public API credential | `prefix`, `keyHash` (SHA-256), `scopes[]`, `revokedAt` |
+| `IdempotencyKey` | Stored responses for retried POSTs | `key`, `requestHash`, `responseStatus`, `responseBody` |
+| `WebhookEndpoint` | Subscriber URL | `url`, `secret`, `events[]` |
+| `WebhookEvent` | Outbox: every domain event | `type`, `data` (JSON) |
+| `WebhookDelivery` | One event to one endpoint | `status`, `attempts`, `nextAttemptAt`, `lastError` |
 | `CreditPolicy` | Immutable, versioned credit policy per NBFC | `policyKey`, `version`, `document` (JSON), `checksum`, `isActive` |
 
-> **Note:** All enum fields are stored as `String` for SQLite compatibility.
+> **Note:** Status and role fields are stored as `String`, and the original JSON columns are still text (newer tables use `jsonb`). Converting both is tracked on the roadmap.
+
+**Application statuses:** `APPLIED` → `UNDER_REVIEW` (after evaluation) → `PENDING_APPROVAL` (maker approved; a checker is required) → `SANCTIONED`, or `REJECTED`. A checker can return a pending sanction to `UNDER_REVIEW`. Every transition is a guarded update, so double-clicks and concurrent requests cannot apply twice.
 
 ---
 
@@ -139,7 +160,38 @@ CreditPolicy (1) ─── (*) CreditDecision
 |--------|----------|-------------|
 | `POST` | `/api/applications` | Creates new loan application with borrower, financial data, and collateral |
 | `POST` | `/api/applications/[id]/decide` | Runs 3-stage underwriting pipeline: fraud pre-checks → bureau overlay → credit scoring |
-| `POST` | `/api/applications/[id]/process` | Processes final decision (approve/reject/refer) with sanction details |
+| `POST` | `/api/applications/[id]/process` | `APPROVE` / `REJECT` / `REFER` (maker), `CONFIRM` / `RETURN` (checker) |
+
+All three call `lib/services/applications.ts`, the same code the public API uses.
+
+### Admin (session, ADMIN only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` / `POST` | `/api/admin/api-keys` | List / create API keys (the full key is returned once) |
+| `DELETE` | `/api/admin/api-keys/[id]` | Revoke a key |
+| `GET` / `POST` | `/api/admin/webhooks` | List / register webhook endpoints (the secret is returned once) |
+| `DELETE` | `/api/admin/webhooks/[id]` | Remove an endpoint |
+| `POST` | `/api/admin/webhooks/[id]/test` | Send a `webhook.test` event |
+
+### Public API (`/api/v1`, API key)
+
+See [API.md](API.md) and the interactive reference at `/docs/api` (spec at `/api/v1/openapi.json`).
+
+| Method | Endpoint | Scope |
+|--------|----------|-------|
+| `POST` | `/api/v1/applications` | `applications:write` (supports `Idempotency-Key`) |
+| `GET` | `/api/v1/applications`, `/api/v1/applications/{id}` | `applications:read` |
+| `POST` | `/api/v1/applications/{id}/evaluate` | `applications:evaluate` |
+| `POST` | `/api/v1/evaluate` | `evaluate` (stateless) |
+| `GET` | `/api/v1/policy` | `policy:read` |
+| `GET` | `/api/v1/events` | `events:read` |
+
+The API cannot sanction. Approvals require a signed-in user.
+
+### Maker-checker
+
+The policy's `approvals` section decides when a second approver is needed (`checkerRequiredAbove`, `checkerRequiredForOverrides`) and who may act as checker (`checkerRoles`). The checker must be a different user from the maker. Rules are taken from the policy the application was **evaluated** under, so a policy change mid-review cannot alter them.
 
 ---
 
@@ -306,7 +358,8 @@ npm install
 # Configure environment (then set SESSION_SECRET)
 cp .env.example .env
 
-# Create the database and load demo data
+# Start Postgres (Docker) and create the schema + demo data
+npm run db:up
 npm run setup
 
 # Start development server
@@ -319,6 +372,7 @@ npm run dev
 |-------|----------|------|
 | `admin@credflow.io` | `Admin@123` | ADMIN |
 | `analyst@credflow.io` | `Analyst@123` | ANALYST |
+| `analyst2@credflow.io` | `Analyst@123` | ANALYST |
 | `viewer@credflow.io` | `Viewer@123` | VIEWER |
 | `admin@smegrowth.in` | `Admin@123` | ADMIN (second NBFC) |
 
@@ -365,10 +419,10 @@ Policy versions are immutable. Applying changed content under an existing `id@ve
 
 | Command | What it checks |
 |---|---|
-| `npm test` | Engine unit tests, policy schema validation, bundled policies, and **legacy parity**: 500 recorded v0.1 decisions reproduced field-for-field under `legacy-v0.1.yaml` |
+| `npm test` | Engine unit tests, policy schema validation, bundled policies, **legacy parity** (500 recorded v0.1 decisions reproduced field-for-field under `legacy-v0.1.yaml`), and app unit tests (webhook signing, SSRF checks, API key format) |
 | `npm run typecheck` | App and engine TypeScript |
 | `npm run lint` | ESLint |
-| `npm run smoke` | Against a running, freshly seeded instance: auth, forged/tampered sessions, roles, tenant isolation, policy-linked decisions |
+| `npm run smoke` | Against a running, seeded instance: auth, forged/tampered sessions, roles, tenant isolation, policy-linked decisions, maker-checker, public API (scopes, idempotency, isolation, revocation), webhooks (delivery, signature, retry) and the append-only audit log |
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, tests, policy validation, a default-policy drift check and both builds. It then runs the smoke test against a production build, and builds and boots the Docker image.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, tests, a migration drift check, policy validation, a default-policy drift check and both builds. It then runs the smoke test against a production build backed by Postgres, and builds and boots the Docker Compose stack.
 

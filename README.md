@@ -14,7 +14,10 @@ CredFlow takes an SME loan application through fraud pre-checks, an optional bur
 - **Multi-tenant.** Multiple NBFCs share one deployment, and each sees only its own borrowers, applications and policy.
 - **Policy as code.** Credit policy lives in validated, versioned YAML. Versions are immutable, and every decision links to the exact one it ran under.
 - **Use just the engine.** [`@credflow/engine`](packages/engine) is a pure TypeScript package with no database or framework, so you can drop it into an existing loan system.
-- **Auditable.** Analyst overrides require a reason and are logged.
+- **API-first.** A REST API with an OpenAPI 3.1 spec, scoped API keys, idempotent writes, signed webhooks and an event feed, so you can plug CredFlow into your LOS, ERP or marketplace. See [docs/API.md](docs/API.md).
+- **Maker-checker.** Your policy decides which sanctions need a second approver (by amount, or whenever the system is overridden), and the checker must be a different user.
+- **Pluggable data.** Interfaces for bureau, GST, PAN and Account Aggregator providers, with mock implementations for development. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Auditable.** Overrides need a reason, and every action (by a user or an API key) goes into an audit log that Postgres refuses to edit or delete.
 
 ## Quick start
 
@@ -30,12 +33,13 @@ Open http://localhost:3000. The demo data and logins are created on first start.
 
 ### Local development
 
-Requires Node.js 20 or later.
+Requires Node.js 20 or later and Postgres (the command below starts one in Docker).
 
 ```bash
 npm install
 cp .env.example .env          # then set SESSION_SECRET (openssl rand -base64 48)
-npm run setup                 # creates the SQLite DB and loads demo data
+npm run db:up                 # Postgres 16 in Docker on localhost:5432
+npm run setup                 # applies migrations and loads demo data
 npm run dev
 ```
 
@@ -43,8 +47,9 @@ npm run dev
 
 | Email | Password | Role | NBFC |
 |---|---|---|---|
-| admin@credflow.io | Admin@123 | Admin | FinFirst Capital |
+| admin@credflow.io | Admin@123 | Admin (checker) | FinFirst Capital |
 | analyst@credflow.io | Analyst@123 | Analyst | FinFirst Capital |
+| analyst2@credflow.io | Analyst@123 | Analyst | FinFirst Capital |
 | viewer@credflow.io | Viewer@123 | Viewer | FinFirst Capital |
 | admin@smegrowth.in | Admin@123 | Admin | SME Growth Finance |
 
@@ -53,10 +58,11 @@ To check tenant isolation, log in as the two admins: each sees only their own NB
 ## How a decision is made
 
 ```
-Application ──► 1. Fraud pre-checks ──► 2. Bureau overlay ──► 3. Credit score ──► Recommendation ──► Analyst decision
-                 (hard stop on            (modifier only,       (cash flow, EMI       APPROVE / REFER     approve / reject /
-                  critical flags)          never a gate)         coverage, stability,  / REJECT + amount   refer, with override
-                                                                 collateral, profile)                      reason if it differs
+Application ──► 1. Fraud pre-checks ──► 2. Bureau overlay ──► 3. Credit score ──► Recommendation ──► Maker ──► Checker
+                 (hard stop on            (modifier only,       (cash flow, EMI       APPROVE / REFER     approve /  (when policy
+                  critical flags; GST/     never a gate)         coverage, stability,  / REJECT + amount   reject /   requires a
+                  PAN checks via                                 collateral, profile)                      refer      second approver)
+                  connectors)
 ```
 
 The scoring model, thresholds and a worked example are in [docs/UNDERWRITING_EXPLAINED.md](docs/UNDERWRITING_EXPLAINED.md).
@@ -98,32 +104,35 @@ See [packages/engine](packages/engine) for details.
 ## Development
 
 ```bash
-npm test             # engine tests, including 500-case parity with v0.1
+npm test                   # engine tests (incl. 500-case parity with v0.1) and app unit tests
 npm run typecheck
 npm run lint
-npm run smoke        # end-to-end checks against a running instance (BASE_URL, default http://localhost:3000)
+npm run db:migrate         # create a migration after changing prisma/schema.prisma
+npm run smoke              # end-to-end checks against a running instance (BASE_URL, default http://localhost:3000)
+npm run webhooks:dispatch  # send due webhook retries (run on a schedule in production)
 ```
 
-CI runs all of these, plus a production build and a Docker boot test, on every pull request.
+CI runs all of these against Postgres on every pull request, plus a production build, a migration drift check and a Docker boot test.
 
 ## Tech stack
 
-Next.js 16 (App Router) · TypeScript · Prisma · SQLite (Postgres support planned) · signed JWT sessions (`jose`) · bcrypt
+Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signed JWT sessions (`jose`) · bcrypt
 
 ## Documentation
 
+- [API guide](docs/API.md), plus the interactive reference at `/docs/api` on any running instance
+- [Data connectors](docs/CONNECTORS.md)
 - [Functional specification](docs/FUNCTIONAL.md)
 - [Technical documentation](docs/TECHNICAL.md)
 - [Underwriting engine explained](docs/UNDERWRITING_EXPLAINED.md)
 
 ## Roadmap
 
+- RBI Key Fact Statement / APR and DPDP consent records
+- Real connectors: Account Aggregator (Sahamati FIUs), GST and commercial bureaus
 - Policy editing and side-by-side backtesting in the UI
 - Publish `@credflow/engine` to npm
-- Public REST API (OpenAPI), per-NBFC API keys and webhooks
-- Connector interfaces for bureau, Account Aggregator, GST and KYC providers
-- Postgres as the default database; maker-checker approvals
-- RBI Key Fact Statement / APR and DPDP consent records
+- API rate limiting and a TypeScript SDK
 
 ## Security
 

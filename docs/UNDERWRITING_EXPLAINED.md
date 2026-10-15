@@ -37,7 +37,7 @@ Decision: **≥70 APPROVE**, **50–69 REFER**, **<50 REJECT**. A different NBFC
 
 ## 3. Concrete Example: SME Loan Analysis
 
-The figures below are the engine's actual output for this input under `credflow-default@1.0.0`. The engine test suite checks them, so this example stays in sync with the code.
+The figures below are the engine's actual output for this input under `credflow-default@1.1.0`. The engine test suite checks them, so this example stays in sync with the code.
 
 ### **The Scenario**
 - **Borrower**: "GreenTech Manufacturing Units"

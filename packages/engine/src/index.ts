@@ -1,6 +1,8 @@
 export { evaluateApplication } from './evaluate'
 export { runFraudChecks } from './fraud'
 export { applyBureauOverlay } from './bureau'
+export { checkerRequirements, canActAsChecker } from './approvals'
+export { ApplicationInputSchema, parseApplicationInput } from './input'
 export {
   amortizedEMI,
   principalForEMI,

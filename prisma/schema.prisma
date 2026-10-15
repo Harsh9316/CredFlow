@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -23,10 +23,17 @@ model NBFC {
   updatedAt DateTime @updatedAt
   isActive  Boolean  @default(true)
 
+  // Last application sequence number issued; incremented atomically per application
+  applicationSeq Int @default(0)
+
   users            User[]
   borrowers        Borrower[]
   loanApplications LoanApplication[]
   creditPolicies   CreditPolicy[]
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookEvents    WebhookEvent[]
+  idempotencyKeys  IdempotencyKey[]
 }
 
 // User with role-based access
@@ -42,9 +49,11 @@ model User {
   updatedAt DateTime @updatedAt
   isActive  Boolean  @default(true)
 
-  nbfc      NBFC       @relation(fields: [nbfcId], references: [id])
-  approvals Approval[]
-  auditLogs AuditLog[]
+  nbfc             NBFC       @relation(fields: [nbfcId], references: [id])
+  approvals        Approval[] @relation("ApprovalMaker")
+  checkedApprovals Approval[] @relation("ApprovalChecker")
+  auditLogs        AuditLog[]
+  apiKeysCreated   ApiKey[]
 }
 
 // ==================== BORROWER & LOAN ====================
@@ -232,15 +241,25 @@ model Approval {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // Maker-checker. Status: CONFIRMED | PENDING_CHECKER | RETURNED
+  status         String    @default("CONFIRMED")
+  checkerReasons Json? // Why a checker was required (from the credit policy)
+  checkedBy      String?
+  checkedAt      DateTime?
+  checkerRemarks String?
+
   application LoanApplication @relation(fields: [applicationId], references: [id])
-  user        User            @relation(fields: [approvedBy], references: [id])
+  user        User            @relation("ApprovalMaker", fields: [approvedBy], references: [id])
+  checker     User?           @relation("ApprovalChecker", fields: [checkedBy], references: [id])
 }
 
 // Audit trail
+// Exactly one of userId / apiKeyId identifies who acted.
 model AuditLog {
   id            String   @id @default(cuid())
   applicationId String?
-  userId        String
+  userId        String?
+  apiKeyId      String?
   action        String
   details       String? // JSON with action details
   ipAddress     String?
@@ -248,7 +267,8 @@ model AuditLog {
   timestamp     DateTime @default(now())
 
   application LoanApplication? @relation(fields: [applicationId], references: [id])
-  user        User             @relation(fields: [userId], references: [id])
+  user        User?            @relation(fields: [userId], references: [id])
+  apiKey      ApiKey?          @relation(fields: [apiKeyId], references: [id])
 }
 
 // ==================== CREDIT POLICY ====================
@@ -274,4 +294,93 @@ model CreditPolicy {
 
   @@unique([nbfcId, policyKey, version])
   @@index([nbfcId, isActive])
+}
+
+// ==================== PUBLIC API ====================
+
+// API key for the public /api/v1 API. Only a SHA-256 hash of the secret is stored;
+// the full key is shown once at creation. Format: cf_<prefix>_<secret>
+model ApiKey {
+  id          String    @id @default(cuid())
+  nbfcId      String
+  name        String
+  prefix      String    @unique
+  keyHash     String    @unique
+  scopes      String[]
+  createdById String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+
+  nbfc      NBFC       @relation(fields: [nbfcId], references: [id])
+  createdBy User?      @relation(fields: [createdById], references: [id])
+  auditLogs AuditLog[]
+}
+
+// Stored responses for POST requests sent with an Idempotency-Key header,
+// so a retried request returns the original result instead of creating a duplicate.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  nbfcId         String
+  key            String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+
+  nbfc NBFC @relation(fields: [nbfcId], references: [id])
+
+  @@unique([nbfcId, key])
+}
+
+// ==================== WEBHOOKS ====================
+
+model WebhookEndpoint {
+  id          String   @id @default(cuid())
+  nbfcId      String
+  url         String
+  description String?
+  secret      String // Used to sign deliveries (HMAC-SHA256)
+  events      String[] // Event types, or ["*"] for all
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  nbfc       NBFC              @relation(fields: [nbfcId], references: [id])
+  deliveries WebhookDelivery[]
+}
+
+// Every event is recorded (outbox), whether or not any endpoint subscribes to it.
+model WebhookEvent {
+  id        String   @id @default(cuid())
+  nbfcId    String
+  type      String
+  data      Json
+  createdAt DateTime @default(now())
+
+  nbfc       NBFC              @relation(fields: [nbfcId], references: [id])
+  deliveries WebhookDelivery[]
+
+  @@index([nbfcId, createdAt])
+}
+
+// Status: PENDING | SUCCEEDED | FAILED (gave up after max attempts)
+model WebhookDelivery {
+  id             String    @id @default(cuid())
+  endpointId     String
+  eventId        String
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  lastAttemptAt  DateTime?
+  responseStatus Int?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  event    WebhookEvent    @relation(fields: [eventId], references: [id])
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
 }

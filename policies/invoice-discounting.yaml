@@ -3,7 +3,7 @@
 # Illustrative starting point only: calibrate against your own portfolio before use.
 id: invoice-discounting
 name: Invoice discounting
-version: 1.0.0
+version: 1.1.0
 description: Short-tenure receivables finance secured on invoices.
 
 decision:
@@ -103,6 +103,11 @@ fraud:
     excessiveBankFlow: { severity: WARNING, maxBankToTurnoverRatio: 3 }
     newEntityLargeLoan: { severity: WARNING, maxVintageMonths: 6, amountAbove: 2500000 }
     loanExceedsTurnover: { severity: WARNING }
+
+approvals:
+  checkerRequiredAbove: 2500000
+  checkerRequiredForOverrides: true
+  checkerRoles: [ADMIN]
 
 bureau:
   fraudAlertModifier: -100

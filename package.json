@@ -8,14 +8,17 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit && npm run typecheck -w @credflow/engine",
-    "db:push": "prisma db push",
     "db:seed": "tsx seed.ts",
-    "setup": "prisma db push && tsx seed.ts",
-    "test": "npm run test -w @credflow/engine",
+    "setup": "prisma migrate deploy && tsx seed.ts",
+    "test": "npm run test -w @credflow/engine && vitest run",
     "build:engine": "npm run build -w @credflow/engine",
     "policy": "tsx scripts/policy.ts",
     "policy:sync-default": "tsx scripts/generate-default-policy.ts",
-    "smoke": "tsx scripts/smoke-test.ts"
+    "smoke": "tsx scripts/smoke-test.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:up": "docker compose up -d db",
+    "webhooks:dispatch": "tsx scripts/dispatch-webhooks.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -27,7 +30,8 @@
     "react": "19.2.3",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.3",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -38,7 +42,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tsx": "^4.23.15",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   },
   "license": "Apache-2.0",
   "engines": {

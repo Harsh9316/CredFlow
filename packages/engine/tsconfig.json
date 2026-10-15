@@ -16,7 +16,8 @@
   },
   "include": [
     "src",
-    "test"
+    "test",
+    "vitest.config.ts"
   ],
   "exclude": [
     "test/generate-legacy-golden.ts"
