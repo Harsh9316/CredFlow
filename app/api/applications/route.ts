@@ -1,22 +1,26 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { cookies } from 'next/headers'
+import { requireApiSession } from '@/lib/auth'
 
-const SESSION_COOKIE_NAME = 'credflow_session'
+type MonthlyFlow = { month: string; inflow: number; outflow: number }
 
-async function getSession() {
-  const cookieStore = await cookies()
-  const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)
-  if (!sessionCookie?.value) return null
-  try { return JSON.parse(sessionCookie.value) } catch { return null }
+// Accepts real month-by-month figures from the caller. Anything malformed is dropped
+// rather than guessed at, because the fraud checks read this data.
+function parseMonthlyData(value: unknown): MonthlyFlow[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null
+  const rows = value.map(row => ({
+    month: String(row?.month ?? ''),
+    inflow: Number(row?.inflow),
+    outflow: Number(row?.outflow),
+  }))
+  const valid = rows.every(r => r.month && Number.isFinite(r.inflow) && Number.isFinite(r.outflow))
+  return valid ? rows : null
 }
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const { session, error } = await requireApiSession(['ADMIN', 'ANALYST'])
+    if (error) return error
 
     const body = await request.json()
     const {
@@ -27,7 +31,7 @@ export async function POST(request: Request) {
       // Loan fields
       requestedAmount, requestedTenure, purpose, sourcePlatform, priority,
       // Financial fields
-      avgMonthlyInflow, avgMonthlyExpenses, freeCashFlow, inflowVolatility,
+      avgMonthlyInflow, avgMonthlyExpenses, freeCashFlow, inflowVolatility, monthlyData,
       // Collateral fields
       collateralType, collateralDescription, assessedValue, ltv, collateralCap,
       hasPersonalGuarantee, guarantorName, guarantorRelation,
@@ -39,15 +43,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Generate application number
+    // Generate application number, prefixed with the NBFC's own code
+    const nbfc = await prisma.nBFC.findUniqueOrThrow({ where: { id: session.nbfcId }, select: { code: true } })
     const year = new Date().getFullYear()
     const count = await prisma.loanApplication.count({ where: { nbfcId: session.nbfcId } })
-    const appNo = `FFC-${year}-${String(count + 1).padStart(4, '0')}`
+    const appNo = `${nbfc.code}-${year}-${String(count + 1).padStart(4, '0')}`
 
     // Create or use existing borrower
     let borrowerId = existingBorrowerId
 
-    if (!borrowerId) {
+    if (borrowerId) {
+      const owned = await prisma.borrower.findFirst({
+        where: { id: borrowerId, nbfcId: session.nbfcId },
+        select: { id: true },
+      })
+      if (!owned) {
+        return NextResponse.json({ error: 'Borrower not found' }, { status: 404 })
+      }
+    } else {
       if (!businessName || !contactPerson || !contactPhone) {
         return NextResponse.json({ error: 'Borrower details required' }, { status: 400 })
       }
@@ -98,13 +111,7 @@ export async function POST(request: Request) {
       const expenses = parseFloat(avgMonthlyExpenses)
       const fcf = freeCashFlow ? parseFloat(freeCashFlow) : inflow - expenses
 
-      // Generate simple monthly data
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
-      const monthlyData = months.map(m => ({
-        month: m,
-        inflow: Math.round(inflow * (0.85 + Math.random() * 0.3)),
-        outflow: Math.round(expenses * (0.85 + Math.random() * 0.3)),
-      }))
+      const monthly = parseMonthlyData(monthlyData)
 
       await prisma.financialData.create({
         data: {
@@ -118,7 +125,7 @@ export async function POST(request: Request) {
           inflowVolatility: inflowVolatility ? parseFloat(inflowVolatility) : 0.2,
           totalCredits: inflow * 6,
           totalDebits: expenses * 6,
-          monthlyData: JSON.stringify(monthlyData),
+          monthlyData: monthly ? JSON.stringify(monthly) : null,
         }
       })
     }

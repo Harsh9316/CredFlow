@@ -18,13 +18,13 @@
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
-| **Framework** | Next.js (App Router) | 14.x |
+| **Framework** | Next.js (App Router) | 16.x |
 | **Language** | TypeScript | 5.x |
 | **Database** | SQLite | 3.x |
 | **ORM** | Prisma | 5.x |
 | **Styling** | Vanilla CSS (CSS Variables) | — |
 | **Runtime** | Node.js | 22.x |
-| **Authentication** | Cookie-based sessions (`httpOnly`) | — |
+| **Authentication** | Signed JWT session cookie (`jose`, HS256) + bcrypt | — |
 
 ---
 
@@ -234,10 +234,16 @@ Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
 
 ### Flow
 1. User submits credentials via login form
-2. Server validates against `User` table (bcrypt-hashed passwords)
-3. On success, sets `credflow_session` cookie (`httpOnly`, `secure` in production)
-4. Client components fetch `/api/auth/session` to get user data
-5. Server components read cookies directly via `next/headers`
+2. Server validates against `User` table (bcrypt-hashed passwords, constant-time on unknown emails)
+3. On success, sets `credflow_session` cookie: an HS256-signed JWT (`httpOnly`, `secure` in production, 8h expiry) signed with `SESSION_SECRET`
+4. `proxy.ts` rejects requests to dashboard pages and `/api/applications/*` without a valid signature
+5. Pages and route handlers call `getSession()` / `requirePageSession()` / `requireApiSession()` from `lib/auth.ts`, which re-check the user is still active
+
+### Tenant Isolation
+Every query for applications, borrowers, approvals and settings is filtered by the session's `nbfcId`. Requests for another NBFC's records return 404.
+
+### Credit Policy
+`lib/policy.ts` loads the NBFC's `Settings` row and merges it over the engine defaults. The engine receives this policy on every run, and the policy version is stored with each decision in `calculationInputs.creditPolicyVersion`.
 
 ### Role-Based Access Control
 
@@ -245,7 +251,7 @@ Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
 |------|------------|
 | `ADMIN` | Full access to all features including settings |
 | `ANALYST` | Create applications, run engine, process approvals |
-| `VIEWER` | Read-only access to all pages, no underwriting actions |
+| `VIEWER` | Read-only access to all pages, no underwriting actions (enforced in the API) |
 
 ---
 
@@ -282,12 +288,11 @@ Located at `lib/decision-engine.ts` + `lib/fraud-checks.ts`.
 # Install dependencies
 npm install
 
-# Set up database
-npx prisma generate
-npx prisma db push
+# Configure environment (then set SESSION_SECRET)
+cp .env.example .env
 
-# Seed sample data
-npx ts-node seed.ts
+# Create the database and load demo data
+npm run setup
 
 # Start development server
 npm run dev
@@ -299,3 +304,5 @@ npm run dev
 |-------|----------|------|
 | `admin@credflow.io` | `Admin@123` | ADMIN |
 | `analyst@credflow.io` | `Analyst@123` | ANALYST |
+| `viewer@credflow.io` | `Viewer@123` | VIEWER |
+| `admin@smegrowth.in` | `Admin@123` | ADMIN (second NBFC) |

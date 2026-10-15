@@ -1,7 +1,8 @@
 // Credit Decision Engine
 // Rule-based scoring with explainable outputs
 
-type CollateralType = 'LAP' | 'MACHINERY' | 'INVOICE' | 'STOCK' | 'FD' | 'NONE'
+export type CollateralType = 'LAP' | 'MACHINERY' | 'INVOICE' | 'STOCK' | 'FD' | 'NONE'
+export type RiskBand = 'LOW' | 'MEDIUM' | 'HIGH'
 
 export type FinancialMetrics = {
   avgMonthlyInflow: number
@@ -53,8 +54,18 @@ export type DecisionOutput = {
   recommendations: string[]
 }
 
-// Configuration defaults (can be overridden by NBFC settings)
-const DEFAULT_CONFIG = {
+export type EngineConfig = {
+  approveThreshold: number
+  referThreshold: number
+  minEMICoverage: number
+  maxInflowCV: number
+  minBusinessVintage: number
+  ltvLimits: Record<CollateralType, number>
+  industryRiskBands: Record<string, RiskBand>
+}
+
+// Configuration defaults (overridden per NBFC via the Settings table, see lib/policy.ts)
+export const DEFAULT_CONFIG: EngineConfig = {
   approveThreshold: 70,
   referThreshold: 50,
   minEMICoverage: 1.5,
@@ -78,7 +89,7 @@ const DEFAULT_CONFIG = {
     'Real Estate': 'HIGH',
     'Hospitality': 'HIGH',
     'Trading': 'MEDIUM'
-  } as Record<string, 'LOW' | 'MEDIUM' | 'HIGH'>
+  }
 }
 
 export function calculateCashFlowEligibility(
@@ -97,7 +108,8 @@ export function calculateCashFlowEligibility(
 }
 
 export function calculateCollateralEligibility(
-  collateral: CollateralInfo | null
+  collateral: CollateralInfo | null,
+  ltvLimits: Record<CollateralType, number> = DEFAULT_CONFIG.ltvLimits
 ): number {
   if (!collateral || collateral.type === 'NONE') {
     return 0
@@ -105,7 +117,7 @@ export function calculateCollateralEligibility(
   
   const effectiveLTV = Math.min(
     collateral.ltv,
-    DEFAULT_CONFIG.ltvLimits[collateral.type]
+    ltvLimits[collateral.type] ?? 0
   )
   
   return Math.round(collateral.assessedValue * (effectiveLTV / 100))
@@ -113,7 +125,7 @@ export function calculateCollateralEligibility(
 
 export function calculateScoreBreakdown(
   inputs: DecisionInputs,
-  config = DEFAULT_CONFIG
+  config: EngineConfig = DEFAULT_CONFIG
 ): ScoreBreakdown {
   const { financial, collateral, borrower, requestedAmount } = inputs
   
@@ -149,7 +161,7 @@ export function calculateScoreBreakdown(
   // 4. Collateral Score (0-15)
   let collateralScore = 0
   if (collateral && collateral.type !== 'NONE') {
-    const collateralCap = calculateCollateralEligibility(collateral)
+    const collateralCap = calculateCollateralEligibility(collateral, config.ltvLimits)
     const collateralCoverage = collateralCap / requestedAmount
     
     if (collateralCoverage >= 1.2) collateralScore = 15
@@ -199,7 +211,7 @@ export function calculateScoreBreakdown(
 
 export function generateDecision(
   inputs: DecisionInputs,
-  config = DEFAULT_CONFIG
+  config: EngineConfig = DEFAULT_CONFIG
 ): DecisionOutput {
   const scoreBreakdown = calculateScoreBreakdown(inputs, config)
   const creditScore = scoreBreakdown.total
@@ -211,7 +223,7 @@ export function generateDecision(
     config.minEMICoverage
   )
   
-  const collateralEligible = calculateCollateralEligibility(inputs.collateral)
+  const collateralEligible = calculateCollateralEligibility(inputs.collateral, config.ltvLimits)
   
   // Final recommended amount is lower of:
   // - Cash flow eligible
@@ -254,8 +266,8 @@ export function generateDecision(
   // Cash flow related
   if (inputs.financial.emiCoverageRatio >= 2) {
     approvalReasons.push('Strong EMI coverage ratio (≥2x)')
-  } else if (inputs.financial.emiCoverageRatio >= 1.5) {
-    approvalReasons.push('Adequate EMI coverage ratio (≥1.5x)')
+  } else if (inputs.financial.emiCoverageRatio >= config.minEMICoverage) {
+    approvalReasons.push(`Adequate EMI coverage ratio (≥${config.minEMICoverage}x)`)
   } else {
     riskFlags.push(`Low EMI coverage ratio (${inputs.financial.emiCoverageRatio.toFixed(2)}x)`)
   }
@@ -269,7 +281,7 @@ export function generateDecision(
   // Volatility
   if (inputs.financial.inflowVolatility <= 0.25) {
     approvalReasons.push('Stable cash inflows with low volatility')
-  } else if (inputs.financial.inflowVolatility > 0.5) {
+  } else if (inputs.financial.inflowVolatility > config.maxInflowCV) {
     riskFlags.push(`High inflow volatility (CV: ${(inputs.financial.inflowVolatility * 100).toFixed(0)}%)`)
   }
   
@@ -296,8 +308,8 @@ export function generateDecision(
   // Business profile
   if (inputs.borrower.vintage >= 36) {
     approvalReasons.push(`Established business with ${Math.floor(inputs.borrower.vintage / 12)}+ years vintage`)
-  } else if (inputs.borrower.vintage < 12) {
-    riskFlags.push('Business vintage less than 1 year')
+  } else if (inputs.borrower.vintage < config.minBusinessVintage) {
+    riskFlags.push(`Business vintage below policy minimum of ${config.minBusinessVintage} months`)
     recommendations.push('Consider shorter tenure or lower quantum for newer businesses')
   }
   

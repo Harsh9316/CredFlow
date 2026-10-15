@@ -1,21 +1,12 @@
 import prisma from '@/lib/db'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { cookies } from 'next/headers'
 import DecisionPanel from '@/components/DecisionPanel'
+import { requirePageSession } from '@/lib/auth'
 
-const SESSION_COOKIE_NAME = 'credflow_session'
-
-async function getSession() {
-  const cookieStore = await cookies()
-  const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)
-  if (!sessionCookie?.value) return null
-  try { return JSON.parse(sessionCookie.value) } catch { return null }
-}
-
-async function getApplication(id: string) {
-  const application = await prisma.loanApplication.findUnique({
-    where: { id },
+async function getApplication(id: string, nbfcId: string) {
+  const application = await prisma.loanApplication.findFirst({
+    where: { id, nbfcId },
     include: {
       borrower: true,
       collateral: true,
@@ -120,8 +111,8 @@ function getCollateralTypeLabel(type: string): string {
 
 export default async function ApplicationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const application = await getApplication(id)
-  const session = await getSession()
+  const session = await requirePageSession()
+  const application = await getApplication(id, session.nbfcId)
 
   if (!application) {
     notFound()
@@ -358,7 +349,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
             hasDecision={!!creditDecision}
             systemDecision={creditDecision?.decision}
             recommendedAmount={creditDecision?.finalRecommendedAmt}
-            userRole={session?.role || 'VIEWER'}
+            userRole={session.role}
           />
 
           {/* Fraud Pre-Check Results */}

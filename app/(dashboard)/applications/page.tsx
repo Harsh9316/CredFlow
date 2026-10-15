@@ -1,8 +1,10 @@
 import prisma from '@/lib/db'
 import Link from 'next/link'
+import { requirePageSession } from '@/lib/auth'
 
-async function getApplications() {
+async function getApplications(nbfcId: string) {
   return prisma.loanApplication.findMany({
+    where: { nbfcId },
     orderBy: { appliedAt: 'desc' },
     include: {
       borrower: {
@@ -60,7 +62,8 @@ function getSecurityType(collateralType: string | null | undefined) {
 }
 
 export default async function ApplicationsPage() {
-  const applications = await getApplications()
+  const session = await requirePageSession()
+  const applications = await getApplications(session.nbfcId)
 
   return (
     <>

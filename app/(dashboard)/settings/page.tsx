@@ -1,35 +1,18 @@
-import prisma from '@/lib/db'
-
-async function getSettings() {
-  const settings = await prisma.settings.findFirst({
-    include: { nbfc: { select: { name: true } } }
-  })
-  return settings
-}
-
-function formatLtv(ltvLimits: string | null): Record<string, number> {
-  if (!ltvLimits) return {}
-  try {
-    return JSON.parse(ltvLimits)
-  } catch {
-    return {}
-  }
-}
-
-function formatRiskBands(bands: string | null): Record<string, string> {
-  if (!bands) return {}
-  try {
-    return JSON.parse(bands)
-  } catch {
-    return {}
-  }
-}
+import { requirePageSession } from '@/lib/auth'
+import { getCreditPolicy } from '@/lib/policy'
 
 export default async function SettingsPage() {
-  const settings = await getSettings()
+  const session = await requirePageSession()
+  // Show the merged policy the engine actually applies, not just the raw Settings row
+  const policy = await getCreditPolicy(session.nbfcId)
+  const settings = {
+    ...policy,
+    creditPolicyVersion: policy.version,
+    nbfc: { name: session.nbfcName }
+  }
 
-  const ltvLimits = formatLtv(settings?.ltvLimits || null)
-  const riskBands = formatRiskBands(settings?.industryRiskBands || null)
+  const ltvLimits: Record<string, number> = policy.ltvLimits
+  const riskBands: Record<string, string> = policy.industryRiskBands
 
   const collateralTypes = [
     { key: 'LAP', label: 'Loan Against Property' },

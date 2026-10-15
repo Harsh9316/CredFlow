@@ -1,7 +1,8 @@
 import prisma from '@/lib/db'
 import Link from 'next/link'
+import { requirePageSession } from '@/lib/auth'
 
-async function getDashboardStats() {
+async function getDashboardStats(nbfcId: string) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -14,23 +15,24 @@ async function getDashboardStats() {
     sanctionedCount,
     recentApplications
   ] = await Promise.all([
-    prisma.loanApplication.count(),
+    prisma.loanApplication.count({ where: { nbfcId } }),
     prisma.loanApplication.count({
-      where: { appliedAt: { gte: today } }
+      where: { nbfcId, appliedAt: { gte: today } }
     }),
     prisma.loanApplication.count({
-      where: { status: { in: ['APPROVED', 'SANCTIONED'] } }
+      where: { nbfcId, status: { in: ['APPROVED', 'SANCTIONED'] } }
     }),
     prisma.loanApplication.count({
-      where: { status: 'REJECTED' }
+      where: { nbfcId, status: 'REJECTED' }
     }),
     prisma.loanApplication.count({
-      where: { status: 'UNDER_REVIEW' }
+      where: { nbfcId, status: 'UNDER_REVIEW' }
     }),
     prisma.loanApplication.count({
-      where: { status: 'SANCTIONED' }
+      where: { nbfcId, status: 'SANCTIONED' }
     }),
     prisma.loanApplication.findMany({
+      where: { nbfcId },
       take: 10,
       orderBy: { appliedAt: 'desc' },
       include: {
@@ -49,7 +51,7 @@ async function getDashboardStats() {
 
   // Calculate average TAT (days from applied to decided)
   const decidedApps = await prisma.loanApplication.findMany({
-    where: { decidedAt: { not: null } },
+    where: { nbfcId, decidedAt: { not: null } },
     select: { appliedAt: true, decidedAt: true }
   })
 
@@ -113,7 +115,8 @@ function getPriorityBadge(priority: string) {
 }
 
 export default async function DashboardPage() {
-  const stats = await getDashboardStats()
+  const session = await requirePageSession()
+  const stats = await getDashboardStats(session.nbfcId)
 
   return (
     <>

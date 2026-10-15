@@ -2,8 +2,24 @@
 // Run with: npx tsx seed.ts
 
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
+
+// Demo data uses a fixed-seed PRNG so every `npm run db:seed` produces the same
+// numbers, and therefore the same underwriting results.
+function mulberry32(seed: number) {
+  return () => {
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+const random = mulberry32(20260101)
+
+const hash = (password: string) => bcrypt.hashSync(password, 12)
 
 async function main() {
   console.log('🌱 Seeding CredFlow database...')
@@ -45,7 +61,7 @@ async function main() {
   const admin = await prisma.user.create({
     data: {
       email: 'admin@credflow.io',
-      password: 'Admin@123',
+      password: hash('Admin@123'),
       name: 'Rajesh Kumar',
       role: 'ADMIN',
       nbfcId: nbfc1.id
@@ -55,7 +71,7 @@ async function main() {
   const analyst = await prisma.user.create({
     data: {
       email: 'analyst@credflow.io',
-      password: 'Analyst@123',
+      password: hash('Analyst@123'),
       name: 'Priya Sharma',
       role: 'ANALYST',
       nbfcId: nbfc1.id
@@ -65,7 +81,7 @@ async function main() {
   const viewer = await prisma.user.create({
     data: {
       email: 'viewer@credflow.io',
-      password: 'Viewer@123',
+      password: hash('Viewer@123'),
       name: 'Amit Patel',
       role: 'VIEWER',
       nbfcId: nbfc1.id
@@ -75,14 +91,35 @@ async function main() {
   await prisma.user.create({
     data: {
       email: 'analyst2@credflow.io',
-      password: 'Analyst@123',
+      password: hash('Analyst@123'),
       name: 'Sunita Reddy',
       role: 'ANALYST',
       nbfcId: nbfc1.id
     }
   })
 
-  console.log('✅ Created 4 users')
+  // Second tenant, used to check that NBFCs cannot see each other's data
+  await prisma.user.create({
+    data: {
+      email: 'admin@smegrowth.in',
+      password: hash('Admin@123'),
+      name: 'Kavita Menon',
+      role: 'ADMIN',
+      nbfcId: nbfc2.id
+    }
+  })
+
+  await prisma.settings.create({
+    data: {
+      nbfcId: nbfc2.id,
+      approveThreshold: 75,
+      referThreshold: 55,
+      minEMICoverage: 1.75,
+      creditPolicyVersion: 'sgf-v1.0'
+    }
+  })
+
+  console.log('✅ Created 5 users across 2 NBFCs')
 
   // Create Settings
   await prisma.settings.create({
@@ -306,16 +343,16 @@ async function main() {
     const months = ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan']
     return months.map((month) => ({
       month,
-      inflow: Math.round(avgInflow * (1 + (Math.random() - 0.5) * volatility * 2)),
-      outflow: Math.round(avgInflow * 0.7 * (1 + (Math.random() - 0.5) * 0.3))
+      inflow: Math.round(avgInflow * (1 + (random() - 0.5) * volatility * 2)),
+      outflow: Math.round(avgInflow * 0.7 * (1 + (random() - 0.5) * 0.3))
     }))
   }
 
   // Create Financial Data for each borrower
   for (const borrower of borrowers) {
     const avgInflow = (borrower.annualTurnover || 30000000) / 12
-    const volatility = Math.random() * 0.4 + 0.1
-    const avgExpenses = avgInflow * (0.65 + Math.random() * 0.15)
+    const volatility = random() * 0.4 + 0.1
+    const avgExpenses = avgInflow * (0.65 + random() * 0.15)
     const fcf = avgInflow - avgExpenses
 
     await prisma.financialData.create({

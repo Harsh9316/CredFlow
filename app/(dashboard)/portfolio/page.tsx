@@ -1,7 +1,8 @@
 import prisma from '@/lib/db'
 import Link from 'next/link'
+import { requirePageSession } from '@/lib/auth'
 
-async function getPortfolioStats() {
+async function getPortfolioStats(nbfcId: string) {
   const [
     sanctionedApps,
     totalSanctionedAmount,
@@ -10,14 +11,15 @@ async function getPortfolioStats() {
     industryBreakdown
   ] = await Promise.all([
     prisma.loanApplication.count({
-      where: { status: 'SANCTIONED' }
+      where: { nbfcId, status: 'SANCTIONED' }
     }),
     prisma.approval.aggregate({
       _sum: { sanctionedAmount: true },
-      where: { finalDecision: 'APPROVE' }
+      where: { finalDecision: 'APPROVE', application: { nbfcId } }
     }),
     prisma.borrower.count({
       where: {
+        nbfcId,
         loanApplications: {
           some: { status: 'SANCTIONED' }
         }
@@ -25,11 +27,12 @@ async function getPortfolioStats() {
     }),
     prisma.collateral.groupBy({
       by: ['collateralType'],
+      where: { application: { nbfcId } },
       _count: { id: true },
       _sum: { assessedValue: true }
     }),
     prisma.loanApplication.findMany({
-      where: { status: 'SANCTIONED' },
+      where: { nbfcId, status: 'SANCTIONED' },
       include: {
         borrower: { select: { industry: true } },
         approval: { select: { sanctionedAmount: true } }
@@ -50,7 +53,7 @@ async function getPortfolioStats() {
 
   // Get sanctioned applications with details
   const sanctionedApplications = await prisma.loanApplication.findMany({
-    where: { status: 'SANCTIONED' },
+    where: { nbfcId, status: 'SANCTIONED' },
     include: {
       borrower: { select: { businessName: true, industry: true, city: true } },
       collateral: { select: { collateralType: true } },
@@ -141,7 +144,8 @@ function getSecurityBadge(collateralType: string | null | undefined) {
 }
 
 export default async function PortfolioPage() {
-  const stats = await getPortfolioStats()
+  const session = await requirePageSession()
+  const stats = await getPortfolioStats(session.nbfcId)
 
   return (
     <>

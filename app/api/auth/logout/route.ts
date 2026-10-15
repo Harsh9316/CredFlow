@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-
-const SESSION_COOKIE_NAME = 'credflow_session'
+import { destroySession } from '@/lib/auth'
 
 export async function POST() {
-  const cookieStore = await cookies()
-  cookieStore.delete(SESSION_COOKIE_NAME)
-  
+  await destroySession()
   return NextResponse.json({ success: true })
 }
