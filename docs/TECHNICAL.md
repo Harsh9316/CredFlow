@@ -325,22 +325,38 @@ Every query for applications, borrowers, approvals and settings is filtered by t
 ## 7. Frontend Architecture
 
 ### Design System
-- **Theme**: Dark mode with glassmorphism effects
-- **Colors**: CSS custom properties (`--primary-*`, `--accent-*`)
-- **Typography**: Inter font family from Google Fonts
-- **Components**: Cards, badges, tables, progress bars, score gauges, timelines
+- **Themes**: Light by default, plus dark mode. Follows the OS setting, with a Light / Dark / System override in the user menu (stored in `localStorage` and applied before first paint).
+- **Tokens**: CSS custom properties in `app/globals.css` for surfaces, text, a single indigo accent, status tones (success / warning / danger / info) and chart colours.
+- **Typography**: Inter (UI) and JetBrains Mono (identifiers), loaded with `next/font`. Figures use tabular numbers.
+- **Icons**: `lucide-react`.
+- **Layout**: Fixed sidebar with a drawer on screens under 960px. Content max-width is 1320px. Detail pages use a main column plus a sticky decision rail.
+- **Formatting**: `lib/format.ts` covers ₹ amounts in lakh/crore, dates, and status, decision and collateral labels.
+
+### UI kit (`components/ui`)
+
+| Component | Use |
+|-----------|-----|
+| `PageHeader` | Title, description, back link, status badge, actions |
+| `Card` | Section container with header, body and footer; `flush` for edge-to-edge tables |
+| `Stat` | KPI tile |
+| `Badge`, `StatusBadge`, `DecisionBadge` | Status pills |
+| `Alert` | Info / success / warning / danger messages |
+| `Meter`, `ScoreRing` | Score and exposure visuals |
+| `EmptyState` | Empty lists and tables |
 
 ### Key Components
 
 | Component | Path | Type | Description |
 |-----------|------|------|-------------|
-| `Sidebar` | `components/Sidebar.tsx` | Client | Navigation + user session |
-| `DecisionPanel` | `components/DecisionPanel.tsx` | Client | Underwriting actions (run engine, approve/reject) |
-| `LoginPage` | `app/page.tsx` | Client | Authentication form |
-| `DashboardPage` | `(dashboard)/dashboard/page.tsx` | Server | Stats + recent applications |
-| `ApplicationDetailPage` | `(dashboard)/applications/[id]/page.tsx` | Server | Full application view + fraud checks |
-| `NewApplicationPage` | `(dashboard)/applications/new/page.tsx` | Client | Multi-step form wizard |
-| `PortfolioPage` | `(dashboard)/portfolio/page.tsx` | Server | Portfolio + risk governance metrics |
+| `AppShell` | `components/AppShell.tsx` | Client | Sidebar, mobile drawer, user menu, theme switcher |
+| `DecisionPanel` | `components/DecisionPanel.tsx` | Client | Run engine; approve / refer / reject; checker confirm / return |
+| `DeveloperSettings` | `components/DeveloperSettings.tsx` | Client | API keys, webhook endpoints, deliveries |
+| `LoginPage` | `app/page.tsx` | Client | Sign-in with one-click demo accounts |
+| `DashboardPage` | `(dashboard)/dashboard/page.tsx` | Server | KPIs, work queue, recent applications |
+| `ApplicationsPage` | `(dashboard)/applications/page.tsx` | Server | Status tabs, search, table |
+| `ApplicationDetailPage` | `(dashboard)/applications/[id]/page.tsx` | Server | Recommendation, checks, cash flow, activity, decision rail |
+| `NewApplicationPage` | `(dashboard)/applications/new/page.tsx` | Client | Four-step form with live summary |
+| `PortfolioPage` | `(dashboard)/portfolio/page.tsx` | Server | Sanctioned book and concentration limits |
 
 ### Data Flow
 - **Server Components**: Fetch data directly from Prisma (no API calls)

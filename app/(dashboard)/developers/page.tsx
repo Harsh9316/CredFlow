@@ -3,6 +3,9 @@ import { requirePageSession } from '@/lib/auth'
 import { API_SCOPES } from '@/lib/api-keys'
 import { EVENT_TYPES } from '@/lib/services/events'
 import DeveloperSettings from '@/components/DeveloperSettings'
+import { Alert, PageHeader } from '@/components/ui'
+
+export const metadata = { title: 'Developers' }
 
 export default async function DevelopersPage() {
   const session = await requirePageSession()
@@ -10,8 +13,8 @@ export default async function DevelopersPage() {
   if (session.role !== 'ADMIN') {
     return (
       <>
-        <div className="page-header"><div><h1 className="page-title">Developers</h1></div></div>
-        <div className="card"><p className="text-muted">Only NBFC admins can manage API keys and webhooks.</p></div>
+        <PageHeader title="Developers" />
+        <Alert tone="info">Only NBFC admins can manage API keys and webhooks.</Alert>
       </>
     )
   }
@@ -37,15 +40,11 @@ export default async function DevelopersPage() {
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Developers</h1>
-          <p className="page-subtitle">
-            API keys and webhooks for connecting {session.nbfcName}&apos;s systems to CredFlow ·{' '}
-            <a href="/docs/api" target="_blank" rel="noreferrer" style={{ color: 'var(--primary-400)' }}>API reference</a>
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Developers"
+        description={`Connect ${session.nbfcName}'s loan origination system, ERP or marketplace to CredFlow.`}
+        actions={<a href="/docs/api" target="_blank" rel="noreferrer" className="btn btn-secondary">API reference</a>}
+      />
       <DeveloperSettings
         scopes={Object.entries(API_SCOPES).map(([id, description]) => ({ id, description }))}
         eventTypes={EVENT_TYPES.filter(t => t !== 'webhook.test')}

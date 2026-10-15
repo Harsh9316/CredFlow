@@ -1,16 +1,30 @@
-// Seed script for CredFlow sample data
-// Run with: npx tsx seed.ts
+// Demo data for CredFlow. Wipes the database, then creates two NBFCs, their users and
+// policies, and a realistic book of applications.
+//
+// Every application is evaluated by the real engine under its NBFC's policy, so scores,
+// reasons and recommended amounts are exactly what the product would produce. Dates are
+// relative to today, and maker-checker and audit records follow the policy's rules.
+//
+// Run with: npm run db:seed   (never against a production database)
 
 import { readFileSync } from 'node:fs'
 import bcrypt from 'bcryptjs'
 import { parse } from 'yaml'
+import {
+  checkerRequirements,
+  evaluateApplication,
+  type ApplicationInput,
+  type CollateralType,
+  type CreditPolicy,
+  type MonthlyFlow,
+} from '@credflow/engine'
 import prisma from './lib/db'
-import { applyPolicy } from './lib/policy'
+import { applyPolicy, getActivePolicy } from './lib/policy'
 
 const readPolicy = (file: string) => parse(readFileSync(`policies/${file}`, 'utf8'))
+const hash = (password: string) => bcrypt.hashSync(password, 12)
 
-// Demo data uses a fixed-seed PRNG so every `npm run db:seed` produces the same
-// numbers, and therefore the same underwriting results.
+// Fixed-seed PRNG: every run produces the same numbers and therefore the same decisions
 function mulberry32(seed: number) {
   return () => {
     seed |= 0
@@ -22,7 +36,301 @@ function mulberry32(seed: number) {
 }
 const random = mulberry32(20260101)
 
-const hash = (password: string) => bcrypt.hashSync(password, 12)
+const DAY = 86_400_000
+const daysAgo = (d: number, hour = 11) => {
+  const t = new Date(Date.now() - d * DAY)
+  t.setHours(hour, Math.floor(random() * 60), 0, 0)
+  return t
+}
+const later = (from: Date, days: number, hour = 15) => {
+  const t = new Date(from.getTime() + days * DAY)
+  t.setHours(hour, Math.floor(random() * 60), 0, 0)
+  return t
+}
+
+type Outcome = 'APPLIED' | 'EVALUATED' | 'REFERRED' | 'SANCTIONED' | 'PENDING_CHECKER' | 'REJECTED'
+
+type Scenario = {
+  name: string
+  legal: string
+  pan: string
+  /** GSTIN state code; the GSTIN is built from the PAN unless `gstinOverride` is set */
+  state: [code: string, name: string]
+  city: string
+  industry: string
+  constitution: string
+  vintage: number
+  turnover: number
+  contact: [name: string, phone: string, email: string]
+  amount: number
+  tenure: number
+  purpose: string
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT'
+  /** Monthly inflow as a share of turnover/12, expense ratio, and inflow volatility */
+  inflowRatio?: number
+  expenseRatio: number
+  cv: number
+  collateral?: { type: CollateralType; value: number; ltv: number; guarantor?: [string, string] }
+  outcome: Outcome
+  appliedDaysAgo: number
+  sanctionShare?: number
+  rate?: number
+  overrideReason?: string
+  gstinOverride?: string
+  source?: string
+}
+
+const gstinFor = (stateCode: string, pan: string) => `${stateCode}${pan}1Z${'0123456789ABCDEFGHJKLMNPQRSTUVWXYZ'[pan.charCodeAt(9) % 34]}`
+
+function monthlyFlows(avgInflow: number, avgOutflow: number, cv: number, endDate: Date): MonthlyFlow[] {
+  const months: MonthlyFlow[] = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(endDate)
+    d.setDate(1)
+    d.setMonth(d.getMonth() - i - 1)
+    const swing = (random() - 0.5) * 2 * cv * 1.6
+    months.push({
+      month: d.toLocaleString('en-IN', { month: 'short' }),
+      inflow: Math.round(avgInflow * (1 + swing)),
+      outflow: Math.round(avgOutflow * (1 + (random() - 0.5) * 0.2)),
+    })
+  }
+  return months
+}
+
+const FFC: Scenario[] = [
+  { name: 'Sharma Auto Components', legal: 'Sharma Auto Components Pvt Ltd', pan: 'AADCS1234K', state: ['27', 'Maharashtra'], city: 'Pune', industry: 'Manufacturing', constitution: 'Pvt Ltd', vintage: 96, turnover: 5_40_00_000, contact: ['Rakesh Sharma', '98220 41187', 'rakesh@sharmaauto.in'], amount: 75_00_000, tenure: 48, purpose: 'CNC machining line', expenseRatio: 0.72, cv: 0.12, collateral: { type: 'MACHINERY', value: 1_30_00_000, ltv: 60, guarantor: ['Rakesh Sharma', 'Managing Director'] }, outcome: 'SANCTIONED', appliedDaysAgo: 82, rate: 13.5 },
+  { name: 'TechBridge Solutions', legal: 'TechBridge Solutions LLP', pan: 'AAQFT5521M', state: ['29', 'Karnataka'], city: 'Bengaluru', industry: 'IT Services', constitution: 'LLP', vintage: 64, turnover: 3_60_00_000, contact: ['Anita Rao', '99000 21456', 'anita@techbridge.io'], amount: 25_00_000, tenure: 24, purpose: 'Working capital for new contracts', expenseRatio: 0.7, cv: 0.14, collateral: { type: 'INVOICE', value: 42_00_000, ltv: 80 }, outcome: 'SANCTIONED', appliedDaysAgo: 74, rate: 14.5 },
+  { name: 'HealthPlus Diagnostics', legal: 'HealthPlus Diagnostics Pvt Ltd', pan: 'AAFCH7712Q', state: ['36', 'Telangana'], city: 'Hyderabad', industry: 'Healthcare', constitution: 'Pvt Ltd', vintage: 58, turnover: 4_20_00_000, contact: ['Dr. Kiran Reddy', '98490 33221', 'kiran@healthplus.in'], amount: 55_00_000, tenure: 48, purpose: 'MRI scanner', expenseRatio: 0.7, cv: 0.1, collateral: { type: 'MACHINERY', value: 95_00_000, ltv: 60 }, outcome: 'SANCTIONED', appliedDaysAgo: 66, rate: 13.75 },
+  { name: 'Annapurna Foods', legal: 'Annapurna Foods Pvt Ltd', pan: 'AAKCA3390F', state: ['24', 'Gujarat'], city: 'Ahmedabad', industry: 'Food Processing', constitution: 'Pvt Ltd', vintage: 120, turnover: 6_00_00_000, contact: ['Mehul Patel', '98250 77410', 'mehul@annapurnafoods.in'], amount: 60_00_000, tenure: 60, purpose: 'Cold storage expansion', expenseRatio: 0.75, cv: 0.13, collateral: { type: 'LAP', value: 1_40_00_000, ltv: 65 }, outcome: 'SANCTIONED', appliedDaysAgo: 58, rate: 12.75 },
+  { name: 'Coastal Logistics', legal: 'Coastal Logistics Partners', pan: 'AAHFC6612D', state: ['33', 'Tamil Nadu'], city: 'Chennai', industry: 'Logistics', constitution: 'Partnership', vintage: 72, turnover: 3_80_00_000, contact: ['S. Venkatesh', '98400 55190', 'venkat@coastallogistics.in'], amount: 45_00_000, tenure: 36, purpose: 'Fleet of 6 reefer trucks', expenseRatio: 0.7, cv: 0.16, collateral: { type: 'MACHINERY', value: 72_00_000, ltv: 60 }, outcome: 'SANCTIONED', appliedDaysAgo: 49, rate: 14 },
+  { name: 'Sunrise Textiles', legal: 'Sunrise Textiles Pvt Ltd', pan: 'AAGCS8821P', state: ['24', 'Gujarat'], city: 'Surat', industry: 'Textiles', constitution: 'Pvt Ltd', vintage: 84, turnover: 4_80_00_000, contact: ['Nikhil Desai', '98980 12345', 'nikhil@sunrisetex.in'], amount: 50_00_000, tenure: 48, purpose: 'Looms upgrade', expenseRatio: 0.74, cv: 0.15, collateral: { type: 'LAP', value: 1_10_00_000, ltv: 65 }, outcome: 'SANCTIONED', appliedDaysAgo: 41, rate: 13.25 },
+  { name: 'Greenleaf Pharma', legal: 'Greenleaf Pharma Pvt Ltd', pan: 'AAJCG4410H', state: ['06', 'Haryana'], city: 'Gurugram', industry: 'Pharmaceuticals', constitution: 'Pvt Ltd', vintage: 54, turnover: 2_60_00_000, contact: ['Pooja Malhotra', '98110 66520', 'pooja@greenleafpharma.in'], amount: 20_00_000, tenure: 24, purpose: 'Raw material stocking', expenseRatio: 0.68, cv: 0.11, collateral: { type: 'FD', value: 30_00_000, ltv: 90 }, outcome: 'SANCTIONED', appliedDaysAgo: 33, rate: 12.5 },
+  { name: 'Shakti Auto Components', legal: 'Shakti Auto Components Pvt Ltd', pan: 'AAGCS4321K', state: ['27', 'Maharashtra'], city: 'Nashik', industry: 'Manufacturing', constitution: 'Pvt Ltd', vintage: 84, turnover: 1_68_00_000, contact: ['R. Iyer', '98111 11111', 'iyer@shaktiauto.in'], amount: 40_00_000, tenure: 36, purpose: 'Press shop expansion', expenseRatio: 0.5, cv: 0.12, collateral: { type: 'LAP', value: 80_00_000, ltv: 60, guarantor: ['R. Iyer', 'Director'] }, outcome: 'PENDING_CHECKER', appliedDaysAgo: 6, source: 'API' },
+  { name: 'Metro Retail Mart', legal: 'Metro Retail Mart Pvt Ltd', pan: 'AADCM3456N', state: ['07', 'Delhi'], city: 'New Delhi', industry: 'Retail', constitution: 'Pvt Ltd', vintage: 60, turnover: 7_20_00_000, contact: ['Ravi Gupta', '98765 43213', 'ravi@metromart.in'], amount: 1_00_00_000, tenure: 36, purpose: 'Two new outlets', priority: 'HIGH', expenseRatio: 0.88, cv: 0.32, collateral: { type: 'LAP', value: 1_20_00_000, ltv: 65 }, outcome: 'EVALUATED', appliedDaysAgo: 4 },
+  { name: 'Fresh Harvest Agro', legal: 'Fresh Harvest Agro Producer Co', pan: 'AAFCF2290B', state: ['24', 'Gujarat'], city: 'Anand', industry: 'Agriculture', constitution: 'Pvt Ltd', vintage: 30, turnover: 1_80_00_000, contact: ['Jignesh Patel', '97250 10021', 'jignesh@freshharvest.in'], amount: 15_00_000, tenure: 18, purpose: 'Seasonal procurement', expenseRatio: 0.9, cv: 0.42, collateral: { type: 'STOCK', value: 22_00_000, ltv: 50 }, outcome: 'REFERRED', appliedDaysAgo: 11 },
+  { name: 'BuildRight Constructions', legal: 'BuildRight Constructions Pvt Ltd', pan: 'AABCB7781L', state: ['33', 'Tamil Nadu'], city: 'Coimbatore', industry: 'Construction', constitution: 'Pvt Ltd', vintage: 108, turnover: 9_50_00_000, contact: ['K. Murugan', '98430 22107', 'murugan@buildright.in'], amount: 1_50_00_000, tenure: 48, purpose: 'Equipment for metro contract', priority: 'URGENT', expenseRatio: 0.85, cv: 0.3, outcome: 'APPLIED', appliedDaysAgo: 2 },
+  { name: 'Swift Logistics', legal: 'Swift Logistics Pvt Ltd', pan: 'AAMCS5512E', state: ['19', 'West Bengal'], city: 'Kolkata', industry: 'Logistics', constitution: 'Pvt Ltd', vintage: 42, turnover: 5_80_00_000, contact: ['Arjun Sen', '98300 41122', 'arjun@swiftlogistics.in'], amount: 60_00_000, tenure: 36, purpose: 'Warehouse fit-out', expenseRatio: 0.8, cv: 0.2, outcome: 'APPLIED', appliedDaysAgo: 1, source: 'API' },
+  { name: 'Royal Banquets', legal: 'Royal Banquets & Hospitality', pan: 'AAKFR9902C', state: ['08', 'Rajasthan'], city: 'Jaipur', industry: 'Hospitality', constitution: 'Partnership', vintage: 20, turnover: 1_40_00_000, contact: ['Vikram Singh', '94140 55601', 'vikram@royalbanquets.in'], amount: 50_00_000, tenure: 36, purpose: 'Renovation', expenseRatio: 0.95, cv: 0.55, outcome: 'REJECTED', appliedDaysAgo: 37 },
+  { name: 'Prime Traders', legal: 'Prime Traders', pan: 'ABCPT4411R', state: ['09', 'Uttar Pradesh'], city: 'Lucknow', industry: 'Trading', constitution: 'Proprietorship', vintage: 26, turnover: 2_20_00_000, contact: ['Sanjay Verma', '98390 77810', 'sanjay@primetraders.in'], amount: 30_00_000, tenure: 24, purpose: 'Inventory', expenseRatio: 0.8, cv: 0.22, outcome: 'REJECTED', appliedDaysAgo: 19, gstinOverride: '09AXZPT9911Q1Z2' },
+]
+
+const SGF: Scenario[] = [
+  { name: 'Kaveri Electricals', legal: 'Kaveri Electricals Pvt Ltd', pan: 'AAHCK3321J', state: ['29', 'Karnataka'], city: 'Mysuru', industry: 'Manufacturing', constitution: 'Pvt Ltd', vintage: 78, turnover: 2_40_00_000, contact: ['Suresh Gowda', '98450 33190', 'suresh@kaverielec.in'], amount: 10_00_000, tenure: 18, purpose: 'Working capital line', expenseRatio: 0.7, cv: 0.12, outcome: 'SANCTIONED', appliedDaysAgo: 28, rate: 18 },
+  { name: 'Urban Threads', legal: 'Urban Threads', pan: 'ABDPU6612L', state: ['27', 'Maharashtra'], city: 'Mumbai', industry: 'Retail', constitution: 'Proprietorship', vintage: 30, turnover: 1_10_00_000, contact: ['Farah Shaikh', '98200 99120', 'farah@urbanthreads.in'], amount: 8_00_000, tenure: 12, purpose: 'Festive season stock', expenseRatio: 0.84, cv: 0.3, outcome: 'EVALUATED', appliedDaysAgo: 3 },
+]
+
+async function seedApplications(
+  nbfc: { id: string; code: string },
+  scenarios: Scenario[],
+  policy: CreditPolicy,
+  policyId: string,
+  users: { maker: string; checker: string }
+) {
+  // Oldest first, so application numbers follow the order they arrived in
+  const ordered = [...scenarios].sort((a, b) => b.appliedDaysAgo - a.appliedDaysAgo)
+  let seq = 0
+  const tally: Record<string, string> = {}
+
+  for (const s of ordered) {
+    seq++
+    const appliedAt = daysAgo(s.appliedDaysAgo, 10)
+    const gstin = s.gstinOverride ?? gstinFor(s.state[0], s.pan)
+    const avgInflow = Math.round((s.turnover / 12) * (s.inflowRatio ?? 1))
+    const avgOutflow = Math.round(avgInflow * s.expenseRatio)
+    const monthly = monthlyFlows(avgInflow, avgOutflow, s.cv, appliedAt)
+
+    const borrower = await prisma.borrower.create({
+      data: {
+        nbfcId: nbfc.id,
+        businessName: s.name,
+        legalName: s.legal,
+        pan: s.pan,
+        gstin,
+        industry: s.industry,
+        constitution: s.constitution,
+        vintage: s.vintage,
+        annualTurnover: s.turnover,
+        city: s.city,
+        state: s.state[1],
+        contactPerson: s.contact[0],
+        contactPhone: s.contact[1],
+        contactEmail: s.contact[2],
+        createdAt: appliedAt,
+      },
+    })
+
+    await prisma.financialData.create({
+      data: {
+        borrowerId: borrower.id,
+        dataType: 'BANK_STATEMENT',
+        periodStart: new Date(appliedAt.getTime() - 180 * DAY),
+        periodEnd: appliedAt,
+        avgMonthlyInflow: avgInflow,
+        avgMonthlyExpenses: avgOutflow,
+        freeCashFlow: avgInflow - avgOutflow,
+        inflowVolatility: s.cv,
+        totalCredits: avgInflow * 6,
+        totalDebits: avgOutflow * 6,
+        monthlyData: JSON.stringify(monthly),
+      },
+    })
+
+    const evaluated = s.outcome !== 'APPLIED'
+    const reviewedAt = later(appliedAt, 1, 12)
+    const decidedAt = later(appliedAt, 2 + Math.floor(random() * 3), 16)
+    const checkedAt = later(decidedAt, 1, 11)
+
+    const input: ApplicationInput = {
+      requestedAmount: s.amount,
+      requestedTenure: s.tenure,
+      borrower: { pan: s.pan, gstin, vintage: s.vintage, industry: s.industry, annualTurnover: s.turnover },
+      financial: { avgMonthlyInflow: avgInflow, avgMonthlyExpenses: avgOutflow, freeCashFlow: avgInflow - avgOutflow, inflowVolatility: s.cv, monthlyData: monthly },
+      collateral: s.collateral ? { type: s.collateral.type, assessedValue: s.collateral.value, ltv: s.collateral.ltv, hasPersonalGuarantee: !!s.collateral.guarantor } : null,
+      bureau: null,
+    }
+    const result = evaluateApplication(input, policy)
+
+    // Statuses follow from the outcome; sanctions only for engine approvals (or an explicit override)
+    const sanctionAmount = Math.min(s.amount, Math.round((result.finalRecommendedAmt * (s.sanctionShare ?? 1)) / 10_000) * 10_000)
+    const isOverride = (s.outcome === 'SANCTIONED' || s.outcome === 'PENDING_CHECKER') && result.decision !== 'APPROVE'
+    const checkerReasons = checkerRequirements(policy, { sanctionedAmount: sanctionAmount, isOverride })
+    const status = {
+      APPLIED: 'APPLIED',
+      EVALUATED: 'UNDER_REVIEW',
+      REFERRED: 'UNDER_REVIEW',
+      PENDING_CHECKER: 'PENDING_APPROVAL',
+      SANCTIONED: 'SANCTIONED',
+      REJECTED: 'REJECTED',
+    }[s.outcome]
+    tally[s.name] = `${s.outcome} · engine ${result.decision} ${result.creditScore} · rec ${result.finalRecommendedAmt} · fraud ${result.fraud.riskLevel}`
+
+    const app = await prisma.loanApplication.create({
+      data: {
+        applicationNo: `${nbfc.code}-${appliedAt.getFullYear()}-${String(seq).padStart(4, '0')}`,
+        nbfcId: nbfc.id,
+        borrowerId: borrower.id,
+        requestedAmount: s.amount,
+        requestedTenure: s.tenure,
+        purpose: s.purpose,
+        priority: s.priority ?? 'NORMAL',
+        sourcePlatform: s.source ?? 'Direct',
+        status,
+        appliedAt,
+        createdAt: appliedAt,
+        reviewedAt: evaluated ? reviewedAt : null,
+        decidedAt: ['SANCTIONED', 'REJECTED'].includes(s.outcome) ? (s.outcome === 'SANCTIONED' && checkerReasons.length ? checkedAt : decidedAt) : null,
+        sanctionedAt: s.outcome === 'SANCTIONED' ? (checkerReasons.length ? checkedAt : decidedAt) : null,
+      },
+    })
+
+    if (s.collateral) {
+      await prisma.collateral.create({
+        data: {
+          applicationId: app.id,
+          collateralType: s.collateral.type,
+          assessedValue: s.collateral.value,
+          ltv: s.collateral.ltv,
+          collateralCap: Math.round((s.collateral.value * s.collateral.ltv) / 100),
+          hasPersonalGuarantee: !!s.collateral.guarantor,
+          guarantorName: s.collateral.guarantor?.[0] ?? null,
+          guarantorRelation: s.collateral.guarantor?.[1] ?? null,
+          valuationDate: appliedAt,
+        },
+      })
+    }
+
+    const audit: { action: string; userId: string; timestamp: Date; details: Record<string, unknown> }[] = [
+      { action: 'APPLICATION_CREATED', userId: users.maker, timestamp: appliedAt, details: { applicationNo: app.applicationNo, requestedAmount: s.amount, requestedTenure: s.tenure } },
+    ]
+
+    if (evaluated) {
+      await prisma.creditDecision.create({
+        data: {
+          applicationId: app.id,
+          creditScore: result.creditScore,
+          decision: result.decision,
+          cashFlowEligible: result.cashFlowEligible,
+          collateralEligible: result.collateralEligible,
+          finalRecommendedAmt: result.finalRecommendedAmt,
+          scoreBreakdown: JSON.stringify(result.scoreBreakdown),
+          approvalReasons: JSON.stringify(result.approvalReasons),
+          riskFlags: JSON.stringify(result.riskFlags),
+          recommendations: JSON.stringify(result.recommendations),
+          calculationInputs: JSON.stringify({
+            ...input,
+            emi: result.emi,
+            emiCoverageRatio: result.emiCoverageRatio,
+            creditPolicyVersion: `${policy.id}@${policy.version}`,
+            connectors: {},
+            fraudPreCheck: { riskLevel: result.fraud.riskLevel, passed: result.fraud.passed, flagCount: result.fraud.flags.length, summary: result.fraud.summary },
+            bureauOverlay: { available: false, modifier: 0 },
+          }),
+          policyId,
+          generatedAt: reviewedAt,
+          createdAt: reviewedAt,
+        },
+      })
+      audit.push({
+        action: result.fraud.riskLevel === 'HIGH_RISK' ? 'FRAUD_FLAG_RAISED' : 'RECOMMENDATION_GENERATED',
+        userId: users.maker,
+        timestamp: reviewedAt,
+        details: { creditScore: result.creditScore, decision: result.decision, recommendedAmount: result.finalRecommendedAmt, policy: `${policy.id}@${policy.version}` },
+      })
+    }
+
+    if (s.outcome === 'REFERRED') {
+      audit.push({ action: 'REFERRED_FOR_REVIEW', userId: users.maker, timestamp: decidedAt, details: { overrideReason: 'Volatile seasonal inflows; requesting 12 months of statements' } })
+    }
+
+    if (s.outcome === 'REJECTED') {
+      await prisma.approval.create({
+        data: { applicationId: app.id, approvedBy: users.maker, finalDecision: 'REJECT', status: 'CONFIRMED', approvedAt: decidedAt },
+      })
+      audit.push({ action: 'APPLICATION_REJECTED', userId: users.maker, timestamp: decidedAt, details: {} })
+    }
+
+    if (s.outcome === 'SANCTIONED' || s.outcome === 'PENDING_CHECKER') {
+      const needsChecker = checkerReasons.length > 0
+      const confirmed = s.outcome === 'SANCTIONED'
+      await prisma.approval.create({
+        data: {
+          applicationId: app.id,
+          approvedBy: users.maker,
+          finalDecision: 'APPROVE',
+          status: needsChecker && !confirmed ? 'PENDING_CHECKER' : 'CONFIRMED',
+          checkerReasons: needsChecker ? checkerReasons : undefined,
+          checkedBy: needsChecker && confirmed ? users.checker : null,
+          checkedAt: needsChecker && confirmed ? checkedAt : null,
+          checkerRemarks: needsChecker && confirmed ? 'Terms verified against appraisal note' : null,
+          overrideSystem: isOverride,
+          overrideReason: isOverride ? s.overrideReason ?? 'Relationship history' : null,
+          sanctionedAmount: sanctionAmount,
+          sanctionedTenure: s.tenure,
+          interestRate: s.rate ?? policy.affordability.annualInterestRate,
+          processingFee: 1.5,
+          approvedAt: decidedAt,
+        },
+      })
+      audit.push({
+        action: needsChecker ? 'SANCTION_SUBMITTED_FOR_CHECK' : 'APPLICATION_APPROVED',
+        userId: users.maker,
+        timestamp: decidedAt,
+        details: { sanctionedAmount: sanctionAmount, checkerReasons },
+      })
+      if (needsChecker && confirmed) {
+        audit.push({ action: 'SANCTION_CONFIRMED_BY_CHECKER', userId: users.checker, timestamp: checkedAt, details: { remarks: 'Terms verified against appraisal note' } })
+      }
+    }
+
+    await prisma.auditLog.createMany({
+      data: audit.map(a => ({ applicationId: app.id, userId: a.userId, action: a.action, timestamp: a.timestamp, details: JSON.stringify(a.details) })),
+    })
+  }
+
+  await prisma.nBFC.update({ where: { id: nbfc.id }, data: { applicationSeq: seq } })
+  return tally
+}
 
 async function main() {
   console.log('🌱 Seeding CredFlow database...')
@@ -34,703 +342,46 @@ async function main() {
     await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map(t => `"${t.tablename}"`).join(', ')} CASCADE`)
   }
 
-  // Create NBFCs
-  const nbfc1 = await prisma.nBFC.create({
-    data: {
-      name: 'FinFirst Capital',
-      code: 'FFC',
-      licenseNo: 'N-07.02891',
-      address: '12th Floor, BKC Tower, Mumbai 400051'
-    }
+  const ffc = await prisma.nBFC.create({
+    data: { name: 'FinFirst Capital', code: 'FFC', licenseNo: 'N-07.02891', address: '12th Floor, BKC Tower, Mumbai 400051' },
+  })
+  const sgf = await prisma.nBFC.create({
+    data: { name: 'SME Growth Finance', code: 'SGF', licenseNo: 'N-13.01234', address: '5th Floor, Cyber Hub, Gurugram 122002' },
   })
 
-  const nbfc2 = await prisma.nBFC.create({
-    data: {
-      name: 'SME Growth Finance',
-      code: 'SGF',
-      licenseNo: 'N-13.01234',
-      address: '5th Floor, Cyber Hub, Gurugram 122002'
-    }
+  const [admin, analyst] = await Promise.all([
+    prisma.user.create({ data: { email: 'admin@credflow.io', password: hash('Admin@123'), name: 'Rajesh Kumar', role: 'ADMIN', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'analyst@credflow.io', password: hash('Analyst@123'), name: 'Priya Sharma', role: 'ANALYST', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'viewer@credflow.io', password: hash('Viewer@123'), name: 'Amit Patel', role: 'VIEWER', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'analyst2@credflow.io', password: hash('Analyst@123'), name: 'Sunita Reddy', role: 'ANALYST', nbfcId: ffc.id } }),
+  ])
+  const sgfAdmin = await prisma.user.create({
+    data: { email: 'admin@smegrowth.in', password: hash('Admin@123'), name: 'Kavita Menon', role: 'ADMIN', nbfcId: sgf.id },
   })
-
-  console.log('✅ Created 2 NBFCs')
-
-  // Create Users
-  const admin = await prisma.user.create({
-    data: {
-      email: 'admin@credflow.io',
-      password: hash('Admin@123'),
-      name: 'Rajesh Kumar',
-      role: 'ADMIN',
-      nbfcId: nbfc1.id
-    }
-  })
-
-  const analyst = await prisma.user.create({
-    data: {
-      email: 'analyst@credflow.io',
-      password: hash('Analyst@123'),
-      name: 'Priya Sharma',
-      role: 'ANALYST',
-      nbfcId: nbfc1.id
-    }
-  })
-
-  const viewer = await prisma.user.create({
-    data: {
-      email: 'viewer@credflow.io',
-      password: hash('Viewer@123'),
-      name: 'Amit Patel',
-      role: 'VIEWER',
-      nbfcId: nbfc1.id
-    }
-  })
-
-  await prisma.user.create({
-    data: {
-      email: 'analyst2@credflow.io',
-      password: hash('Analyst@123'),
-      name: 'Sunita Reddy',
-      role: 'ANALYST',
-      nbfcId: nbfc1.id
-    }
-  })
-
-  // Second tenant, used to check that NBFCs cannot see each other's data
-  await prisma.user.create({
-    data: {
-      email: 'admin@smegrowth.in',
-      password: hash('Admin@123'),
-      name: 'Kavita Menon',
-      role: 'ADMIN',
-      nbfcId: nbfc2.id
-    }
-  })
-
-  console.log('✅ Created 5 users across 2 NBFCs')
+  console.log('✅ Created 2 NBFCs and 5 users')
 
   // Credit policies, from the versioned YAML files in policies/
-  await applyPolicy(nbfc1.id, readPolicy('credflow-default.yaml'))
-  await applyPolicy(nbfc2.id, readPolicy('unsecured-working-capital.yaml'))
-
+  await applyPolicy(ffc.id, readPolicy('credflow-default.yaml'))
+  await applyPolicy(sgf.id, readPolicy('unsecured-working-capital.yaml'))
+  const ffcPolicy = await getActivePolicy(ffc.id)
+  const sgfPolicy = await getActivePolicy(sgf.id)
   console.log('✅ Applied credit policies')
 
-  // Create Borrowers
-  const borrowers = await Promise.all([
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'Sharma Auto Components',
-        legalName: 'Sharma Auto Components Pvt Ltd',
-        pan: 'AADCS1234K',
-        gstin: '27AADCS1234K1ZP',
-        industry: 'Manufacturing',
-        subIndustry: 'Auto Parts',
-        constitution: 'Pvt Ltd',
-        vintage: 84,
-        annualTurnover: 45000000,
-        employeeCount: 45,
-        address: 'Plot 45, MIDC Industrial Area',
-        city: 'Pune',
-        state: 'Maharashtra',
-        pincode: '411057',
-        contactPerson: 'Vikram Sharma',
-        contactPhone: '9876543210',
-        contactEmail: 'vikram@sharmaauto.com'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'TechBridge Solutions',
-        legalName: 'TechBridge Solutions LLP',
-        pan: 'AABFT5678L',
-        gstin: '29AABFT5678L1ZQ',
-        industry: 'IT Services',
-        subIndustry: 'Software Development',
-        constitution: 'LLP',
-        vintage: 48,
-        annualTurnover: 28000000,
-        employeeCount: 35,
-        address: '3rd Floor, Tech Park',
-        city: 'Bangalore',
-        state: 'Karnataka',
-        pincode: '560103',
-        contactPerson: 'Ananya Desai',
-        contactPhone: '9876543211',
-        contactEmail: 'ananya@techbridge.in'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'Fresh Harvest Agro',
-        legalName: 'Fresh Harvest Agro Products',
-        pan: 'AADFH9012M',
-        gstin: '24AADFH9012M1ZR',
-        industry: 'Agriculture',
-        subIndustry: 'Food Processing',
-        constitution: 'Partnership',
-        vintage: 36,
-        annualTurnover: 18000000,
-        employeeCount: 22,
-        address: 'Village Dadra, Taluka Anand',
-        city: 'Anand',
-        state: 'Gujarat',
-        pincode: '388001',
-        contactPerson: 'Mahesh Patel',
-        contactPhone: '9876543212',
-        contactEmail: 'mahesh@freshharvest.co.in'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'Metro Retail Mart',
-        legalName: 'Metro Retail Mart Pvt Ltd',
-        pan: 'AADMR3456N',
-        gstin: '07AADMR3456N1ZS',
-        industry: 'Retail',
-        subIndustry: 'General Merchandise',
-        constitution: 'Pvt Ltd',
-        vintage: 60,
-        annualTurnover: 72000000,
-        employeeCount: 85,
-        address: '12, Main Market',
-        city: 'Delhi',
-        state: 'Delhi',
-        pincode: '110001',
-        contactPerson: 'Ravi Gupta',
-        contactPhone: '9876543213',
-        contactEmail: 'ravi@metromart.in'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'BuildRight Constructions',
-        legalName: 'BuildRight Constructions Pvt Ltd',
-        pan: 'AADBR7890P',
-        gstin: '33AADBR7890P1ZT',
-        industry: 'Construction',
-        subIndustry: 'Residential',
-        constitution: 'Pvt Ltd',
-        vintage: 72,
-        annualTurnover: 95000000,
-        employeeCount: 120,
-        address: '15, Industrial Estate',
-        city: 'Chennai',
-        state: 'Tamil Nadu',
-        pincode: '600032',
-        contactPerson: 'Suresh Iyer',
-        contactPhone: '9876543214',
-        contactEmail: 'suresh@buildright.com'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'HealthPlus Diagnostics',
-        legalName: 'HealthPlus Diagnostics Pvt Ltd',
-        pan: 'AADHP2345Q',
-        gstin: '36AADHP2345Q1ZU',
-        industry: 'Healthcare',
-        subIndustry: 'Diagnostics',
-        constitution: 'Pvt Ltd',
-        vintage: 42,
-        annualTurnover: 32000000,
-        employeeCount: 55,
-        address: 'Near Apollo Hospital',
-        city: 'Hyderabad',
-        state: 'Telangana',
-        pincode: '500034',
-        contactPerson: 'Dr. Lakshmi Rao',
-        contactPhone: '9876543215',
-        contactEmail: 'lakshmi@healthplus.in'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'Swift Logistics',
-        legalName: 'Swift Logistics Services Pvt Ltd',
-        pan: 'AADSL6789R',
-        gstin: '19AADSL6789R1ZV',
-        industry: 'Logistics',
-        subIndustry: 'Freight',
-        constitution: 'Pvt Ltd',
-        vintage: 54,
-        annualTurnover: 58000000,
-        employeeCount: 150,
-        address: 'Transport Nagar',
-        city: 'Kolkata',
-        state: 'West Bengal',
-        pincode: '700001',
-        contactPerson: 'Arun Ghosh',
-        contactPhone: '9876543216',
-        contactEmail: 'arun@swiftlogistics.co.in'
-      }
-    }),
-    prisma.borrower.create({
-      data: {
-        nbfcId: nbfc1.id,
-        businessName: 'Sunrise Textiles',
-        legalName: 'Sunrise Textiles Pvt Ltd',
-        pan: 'AADST0123S',
-        gstin: '24AADST0123S1ZW',
-        industry: 'Manufacturing',
-        subIndustry: 'Textiles',
-        constitution: 'Pvt Ltd',
-        vintage: 96,
-        annualTurnover: 82000000,
-        employeeCount: 200,
-        address: 'Textile Park, Ring Road',
-        city: 'Surat',
-        state: 'Gujarat',
-        pincode: '395010',
-        contactPerson: 'Hitesh Shah',
-        contactPhone: '9876543217',
-        contactEmail: 'hitesh@sunrisetextiles.com'
-      }
-    })
-  ])
-
-  console.log(`✅ Created ${borrowers.length} borrowers`)
-
-  // Generate monthly data for financial analysis
-  function generateMonthlyData(avgInflow: number, volatility: number) {
-    const months = ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan']
-    return months.map((month) => ({
-      month,
-      inflow: Math.round(avgInflow * (1 + (random() - 0.5) * volatility * 2)),
-      outflow: Math.round(avgInflow * 0.7 * (1 + (random() - 0.5) * 0.3))
-    }))
-  }
-
-  // Create Financial Data for each borrower
-  for (const borrower of borrowers) {
-    const avgInflow = (borrower.annualTurnover || 30000000) / 12
-    const volatility = random() * 0.4 + 0.1
-    const avgExpenses = avgInflow * (0.65 + random() * 0.15)
-    const fcf = avgInflow - avgExpenses
-
-    await prisma.financialData.create({
-      data: {
-        borrowerId: borrower.id,
-        dataType: 'BANK_STATEMENT',
-        periodStart: new Date('2025-08-01'),
-        periodEnd: new Date('2026-01-31'),
-        totalCredits: avgInflow * 6,
-        totalDebits: avgExpenses * 6,
-        avgMonthlyInflow: avgInflow,
-        avgMonthlyExpenses: avgExpenses,
-        freeCashFlow: fcf,
-        inflowVolatility: volatility,
-        monthlyData: JSON.stringify(generateMonthlyData(avgInflow, volatility))
-      }
-    })
-  }
-
-  console.log('✅ Created financial data for all borrowers')
-
-  // Create Loan Applications with various statuses
-  const applications = await Promise.all([
-    // Approved applications
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0001',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[0].id,
-        requestedAmount: 5000000,
-        requestedTenure: 36,
-        purpose: 'Purchase of CNC machinery for production expansion',
-        status: 'SANCTIONED',
-        sourcePlatform: 'Direct',
-        priority: 'NORMAL',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-01-15'),
-        reviewedAt: new Date('2026-01-18'),
-        decidedAt: new Date('2026-01-20'),
-        sanctionedAt: new Date('2026-01-22')
-      }
-    }),
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0002',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[1].id,
-        requestedAmount: 2500000,
-        requestedTenure: 24,
-        purpose: 'Working capital for new project delivery',
-        status: 'APPROVED',
-        sourcePlatform: 'ERP',
-        priority: 'HIGH',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-01-20'),
-        reviewedAt: new Date('2026-01-22'),
-        decidedAt: new Date('2026-01-25')
-      }
-    }),
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0003',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[7].id,
-        requestedAmount: 8000000,
-        requestedTenure: 48,
-        purpose: 'Modernization of weaving units',
-        status: 'SANCTIONED',
-        sourcePlatform: 'Direct',
-        priority: 'NORMAL',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-01-10'),
-        reviewedAt: new Date('2026-01-14'),
-        decidedAt: new Date('2026-01-18'),
-        sanctionedAt: new Date('2026-01-20')
-      }
-    }),
-    
-    // Under Review applications
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0004',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[2].id,
-        requestedAmount: 1500000,
-        requestedTenure: 18,
-        purpose: 'Cold storage facility construction',
-        status: 'UNDER_REVIEW',
-        sourcePlatform: 'POS',
-        priority: 'NORMAL',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-02-05'),
-        reviewedAt: new Date('2026-02-07')
-      }
-    }),
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0005',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[3].id,
-        requestedAmount: 10000000,
-        requestedTenure: 36,
-        purpose: 'New retail outlet expansion in tier-2 cities',
-        status: 'UNDER_REVIEW',
-        sourcePlatform: 'Direct',
-        priority: 'HIGH',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-02-06'),
-        reviewedAt: new Date('2026-02-08')
-      }
-    }),
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0006',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[5].id,
-        requestedAmount: 3500000,
-        requestedTenure: 24,
-        purpose: 'Purchase of advanced diagnostic equipment',
-        status: 'UNDER_REVIEW',
-        sourcePlatform: 'ERP',
-        priority: 'URGENT',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-02-07')
-      }
-    }),
-
-    // Applied (new) applications
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0007',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[4].id,
-        requestedAmount: 15000000,
-        requestedTenure: 48,
-        purpose: 'Construction equipment purchase',
-        status: 'APPLIED',
-        sourcePlatform: 'Direct',
-        priority: 'NORMAL',
-        appliedAt: new Date('2026-02-08')
-      }
-    }),
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0008',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[6].id,
-        requestedAmount: 6000000,
-        requestedTenure: 36,
-        purpose: 'Fleet expansion - 10 new trucks',
-        status: 'APPLIED',
-        sourcePlatform: 'POS',
-        priority: 'HIGH',
-        appliedAt: new Date('2026-02-08')
-      }
-    }),
-
-    // Rejected application
-    prisma.loanApplication.create({
-      data: {
-        applicationNo: 'FFC-2026-0009',
-        nbfcId: nbfc1.id,
-        borrowerId: borrowers[2].id,
-        requestedAmount: 5000000,
-        requestedTenure: 24,
-        purpose: 'Land acquisition for new processing unit',
-        status: 'REJECTED',
-        sourcePlatform: 'Direct',
-        priority: 'NORMAL',
-        assignedTo: analyst.id,
-        appliedAt: new Date('2026-01-08'),
-        reviewedAt: new Date('2026-01-12'),
-        decidedAt: new Date('2026-01-15')
-      }
-    })
-  ])
-
-  await prisma.nBFC.update({ where: { id: nbfc1.id }, data: { applicationSeq: applications.length } })
-  console.log(`✅ Created ${applications.length} loan applications`)
-
-  // Create Collateral for some applications
-  await prisma.collateral.create({
-    data: {
-      applicationId: applications[0].id,
-      collateralType: 'MACHINERY',
-      description: 'Existing CNC machines and manufacturing equipment',
-      assessedValue: 3500000,
-      ltv: 60,
-      collateralCap: 2100000,
-      hasPersonalGuarantee: true,
-      guarantorName: 'Vikram Sharma',
-      guarantorRelation: 'Director',
-      valuationDate: new Date('2026-01-17'),
-      valuationAgency: 'ValueFirst Appraisals'
-    }
-  })
-
-  await prisma.collateral.create({
-    data: {
-      applicationId: applications[1].id,
-      collateralType: 'INVOICE',
-      description: 'Outstanding invoices from Fortune 500 clients',
-      assessedValue: 3200000,
-      ltv: 80,
-      collateralCap: 2560000,
-      hasPersonalGuarantee: false
-    }
-  })
-
-  await prisma.collateral.create({
-    data: {
-      applicationId: applications[2].id,
-      collateralType: 'LAP',
-      description: 'Industrial property at Textile Park, Surat',
-      assessedValue: 15000000,
-      ltv: 70,
-      collateralCap: 10500000,
-      hasPersonalGuarantee: true,
-      guarantorName: 'Hitesh Shah',
-      guarantorRelation: 'Promoter',
-      valuationDate: new Date('2026-01-12'),
-      valuationAgency: 'CRISIL Valuations'
-    }
-  })
-
-  await prisma.collateral.create({
-    data: {
-      applicationId: applications[3].id,
-      collateralType: 'STOCK',
-      description: 'Agricultural produce inventory',
-      assessedValue: 1200000,
-      ltv: 50,
-      collateralCap: 600000,
-      hasPersonalGuarantee: true,
-      guarantorName: 'Mahesh Patel',
-      guarantorRelation: 'Partner'
-    }
-  })
-
-  await prisma.collateral.create({
-    data: {
-      applicationId: applications[4].id,
-      collateralType: 'LAP',
-      description: 'Commercial property - existing retail outlets',
-      assessedValue: 18000000,
-      ltv: 65,
-      collateralCap: 11700000,
-      hasPersonalGuarantee: true,
-      guarantorName: 'Ravi Gupta',
-      guarantorRelation: 'Director'
-    }
-  })
-
-  console.log('✅ Created collateral records')
-
-  // Create Credit Decisions
-  await prisma.creditDecision.create({
-    data: {
-      applicationId: applications[0].id,
-      creditScore: 78,
-      decision: 'APPROVE',
-      cashFlowEligible: 5800000,
-      collateralEligible: 2100000,
-      finalRecommendedAmt: 5000000,
-      scoreBreakdown: JSON.stringify({
-        cashFlowScore: 25,
-        coverageScore: 22,
-        stabilityScore: 16,
-        collateralScore: 10,
-        profileScore: 5,
-        total: 78
-      }),
-      approvalReasons: JSON.stringify([
-        'Strong EMI coverage ratio (≥2x)',
-        'Positive free cash flow (₹3.1L/month)',
-        'Established business with 7+ years vintage',
-        'Secured by MACHINERY worth ₹35L',
-        'Low-risk industry: Manufacturing'
-      ]),
-      riskFlags: JSON.stringify([]),
-      recommendations: JSON.stringify([
-        'Standard documentation requirements apply'
-      ])
-    }
-  })
-
-  await prisma.creditDecision.create({
-    data: {
-      applicationId: applications[1].id,
-      creditScore: 82,
-      decision: 'APPROVE',
-      cashFlowEligible: 3200000,
-      collateralEligible: 2560000,
-      finalRecommendedAmt: 2500000,
-      scoreBreakdown: JSON.stringify({
-        cashFlowScore: 28,
-        coverageScore: 23,
-        stabilityScore: 17,
-        collateralScore: 9,
-        profileScore: 5,
-        total: 82
-      }),
-      approvalReasons: JSON.stringify([
-        'Strong EMI coverage ratio (≥2x)',
-        'Positive free cash flow (₹2.3L/month)',
-        'Stable cash inflows with low volatility',
-        'Invoice-backed facility with 80% LTV',
-        'Low-risk industry: IT Services'
-      ]),
-      riskFlags: JSON.stringify([]),
-      recommendations: JSON.stringify([])
-    }
-  })
-
-  await prisma.creditDecision.create({
-    data: {
-      applicationId: applications[8].id,
-      creditScore: 42,
-      decision: 'REJECT',
-      cashFlowEligible: 1800000,
-      collateralEligible: 0,
-      finalRecommendedAmt: 0,
-      scoreBreakdown: JSON.stringify({
-        cashFlowScore: 12,
-        coverageScore: 10,
-        stabilityScore: 8,
-        collateralScore: 0,
-        profileScore: 12,
-        total: 42
-      }),
-      approvalReasons: JSON.stringify([]),
-      riskFlags: JSON.stringify([
-        'Low EMI coverage ratio (0.8x)',
-        'High inflow volatility (CV: 45%)',
-        'Unsecured exposure - no collateral provided',
-        'Requested amount significantly exceeds cash flow eligibility'
-      ]),
-      recommendations: JSON.stringify([
-        'Recommend reapplication with collateral security',
-        'Consider reducing loan amount to ₹15L based on cash flow'
-      ])
-    }
-  })
-
-  console.log('✅ Created credit decisions')
-
-  // Create Approvals
-  await prisma.approval.create({
-    data: {
-      applicationId: applications[0].id,
-      approvedBy: admin.id,
-      finalDecision: 'APPROVE',
-      overrideSystem: false,
-      sanctionedAmount: 5000000,
-      sanctionedTenure: 36,
-      interestRate: 14.5,
-      processingFee: 50000,
-      conditions: JSON.stringify([
-        'Hypothecation of machinery to be completed before disbursement',
-        'Personal guarantee of director to be executed',
-        'Insurance on machinery for loan tenure'
-      ])
-    }
-  })
-
-  await prisma.approval.create({
-    data: {
-      applicationId: applications[2].id,
-      approvedBy: admin.id,
-      finalDecision: 'APPROVE',
-      overrideSystem: false,
-      sanctionedAmount: 8000000,
-      sanctionedTenure: 48,
-      interestRate: 13.75,
-      processingFee: 80000,
-      conditions: JSON.stringify([
-        'Equitable mortgage of property to be registered',
-        'Personal guarantee of promoter',
-        'Quarterly stock statements required'
-      ])
-    }
-  })
-
-  console.log('✅ Created approvals')
-
-  // Create Audit Logs
-  const auditActions = [
-    { applicationId: applications[0].id, userId: analyst.id, action: 'APPLICATION_RECEIVED', details: 'New loan application received' },
-    { applicationId: applications[0].id, userId: analyst.id, action: 'STATUS_CHANGE', details: 'Status changed to UNDER_REVIEW' },
-    { applicationId: applications[0].id, userId: analyst.id, action: 'FINANCIAL_ANALYSIS', details: 'Financial analysis completed' },
-    { applicationId: applications[0].id, userId: analyst.id, action: 'COLLATERAL_ADDED', details: 'Collateral details captured' },
-    { applicationId: applications[0].id, userId: analyst.id, action: 'DECISION_GENERATED', details: 'Credit decision generated - Score: 78' },
-    { applicationId: applications[0].id, userId: admin.id, action: 'APPROVED', details: 'Application approved by NBFC Admin' },
-    { applicationId: applications[0].id, userId: admin.id, action: 'SANCTIONED', details: 'Loan sanctioned for ₹50L @ 14.5% p.a.' },
-  ]
-
-  for (const log of auditActions) {
-    await prisma.auditLog.create({
-      data: {
-        applicationId: log.applicationId,
-        userId: log.userId,
-        action: log.action,
-        details: JSON.stringify({ message: log.details }),
-        timestamp: new Date()
-      }
-    })
-  }
-
-  console.log('✅ Created audit logs')
+  const ffcTally = await seedApplications(ffc, FFC, ffcPolicy.policy, ffcPolicy.policyId!, { maker: analyst.id, checker: admin.id })
+  const sgfTally = await seedApplications(sgf, SGF, sgfPolicy.policy, sgfPolicy.policyId!, { maker: sgfAdmin.id, checker: sgfAdmin.id })
+  console.log(`✅ Created ${FFC.length + SGF.length} applications, each evaluated by the engine`)
+  if (process.env.SEED_VERBOSE) console.log({ ffcTally, sgfTally })
 
   console.log('\n🎉 Seeding completed successfully!')
   console.log('\nDemo Credentials:')
   console.log('  Admin:   admin@credflow.io / Admin@123')
   console.log('  Analyst: analyst@credflow.io / Analyst@123')
   console.log('  Viewer:  viewer@credflow.io / Viewer@123')
+  console.log('  Second NBFC admin: admin@smegrowth.in / Admin@123')
 }
 
 main()
-  .catch((e) => {
+  .catch(e => {
     console.error('Error seeding database:', e)
     process.exit(1)
   })
