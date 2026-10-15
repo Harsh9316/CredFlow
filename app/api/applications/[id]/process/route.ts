@@ -1,29 +1,14 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { cookies } from 'next/headers'
-
-const SESSION_COOKIE_NAME = 'credflow_session'
-
-async function getSession() {
-  const cookieStore = await cookies()
-  const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)
-  if (!sessionCookie?.value) return null
-  try { return JSON.parse(sessionCookie.value) } catch { return null }
-}
+import { requireApiSession } from '@/lib/auth'
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    if (session.role === 'VIEWER') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const { session, error } = await requireApiSession(['ADMIN', 'ANALYST'])
+    if (error) return error
 
     const { id } = await params
     const body = await request.json()
@@ -33,8 +18,8 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
 
-    const application = await prisma.loanApplication.findUnique({
-      where: { id },
+    const application = await prisma.loanApplication.findFirst({
+      where: { id, nbfcId: session.nbfcId },
       include: { creditDecision: true }
     })
 

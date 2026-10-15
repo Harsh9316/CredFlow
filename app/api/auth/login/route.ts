@@ -1,64 +1,49 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { cookies } from 'next/headers'
+import { createSession, verifyPassword, type Role } from '@/lib/auth'
 
-const SESSION_COOKIE_NAME = 'credflow_session'
+// Compared against when the email is unknown, so response time doesn't reveal which emails exist.
+const DUMMY_HASH = '$2a$12$xvZ.kliZPTXpACHiFTGD4O8iW2jlEilSr/kyDPHJN2XutWECddXPu'
 
 export async function POST(request: Request) {
   try {
     const { email, password } = await request.json()
 
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
       return NextResponse.json(
         { error: 'Email and password are required' },
         { status: 400 }
       )
     }
 
-    // Find user
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: email.toLowerCase().trim() },
       include: { nbfc: true }
     })
 
-    if (!user) {
+    const passwordOk = await verifyPassword(password, user?.password ?? DUMMY_HASH)
+
+    if (!user || !passwordOk) {
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }
       )
     }
 
-    // Simple password check (in production, use bcrypt)
-    if (user.password !== password) {
-      return NextResponse.json(
-        { error: 'Invalid email or password' },
-        { status: 401 }
-      )
-    }
-
-    if (!user.isActive) {
+    if (!user.isActive || !user.nbfc.isActive) {
       return NextResponse.json(
         { error: 'Account is deactivated' },
         { status: 403 }
       )
     }
 
-    // Create session
-    const session = {
+    await createSession({
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      role: user.role as Role,
       nbfcId: user.nbfcId,
       nbfcName: user.nbfc.name
-    }
-
-    const cookieStore = await cookies()
-    cookieStore.set(SESSION_COOKIE_NAME, JSON.stringify(session), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7 // 7 days
     })
 
     return NextResponse.json({

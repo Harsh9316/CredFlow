@@ -1,33 +1,23 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { cookies } from 'next/headers'
+import { requireApiSession } from '@/lib/auth'
+import { getCreditPolicy } from '@/lib/policy'
 import { generateDecision } from '@/lib/decision-engine'
 import { runFraudPreChecks, applyBureauOverlay } from '@/lib/fraud-checks'
-
-const SESSION_COOKIE_NAME = 'credflow_session'
-
-async function getSession() {
-  const cookieStore = await cookies()
-  const sessionCookie = cookieStore.get(SESSION_COOKIE_NAME)
-  if (!sessionCookie?.value) return null
-  try { return JSON.parse(sessionCookie.value) } catch { return null }
-}
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const { session, error } = await requireApiSession(['ADMIN', 'ANALYST'])
+    if (error) return error
 
     const { id } = await params
 
     // Get application with all related data
-    const application = await prisma.loanApplication.findUnique({
-      where: { id },
+    const application = await prisma.loanApplication.findFirst({
+      where: { id, nbfcId: session.nbfcId },
       include: {
         borrower: {
           include: { financialData: { orderBy: { periodEnd: 'desc' }, take: 1 } }
@@ -99,7 +89,8 @@ export async function POST(
       }
     }
 
-    const result = generateDecision(inputs)
+    const policy = await getCreditPolicy(session.nbfcId)
+    const result = generateDecision(inputs, policy)
 
     // Apply bureau modifier to credit score
     const adjustedScore = Math.max(0, Math.min(100, result.creditScore + bureauResult.modifier))
@@ -147,6 +138,7 @@ export async function POST(
         recommendations: JSON.stringify(allRecommendations),
         calculationInputs: JSON.stringify({
           ...inputs,
+          creditPolicyVersion: policy.version,
           fraudPreCheck: {
             riskLevel: fraudResult.riskLevel,
             passed: fraudResult.passed,

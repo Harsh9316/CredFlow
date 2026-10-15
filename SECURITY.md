@@ -1,0 +1,16 @@
+# Security Policy
+
+CredFlow handles borrower financial and identity data, so security reports are taken seriously.
+
+## Reporting a vulnerability
+
+Please **do not open a public issue**. Report it privately through [GitHub Security Advisories](https://github.com/Harsh9316/CredFlow/security/advisories/new).
+
+Include the affected version or commit, steps to reproduce, and the impact you expect. We aim to acknowledge reports within 3 working days.
+
+## Deployment checklist
+
+- Set `SESSION_SECRET` to a random value of at least 32 characters, and never reuse the example value.
+- Keep `NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS` unset or `false`.
+- Do not run the demo seed (`npm run db:seed`) against a production database. It deletes all data.
+- Serve over HTTPS. Session cookies are marked `secure` when `NODE_ENV=production`.

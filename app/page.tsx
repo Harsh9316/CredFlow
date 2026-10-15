@@ -103,14 +103,17 @@ export default function LoginPage() {
           <p>Enterprise-grade credit decisioning for NBFCs</p>
         </div>
 
-        <div style={{ marginTop: '2rem', padding: '1rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-lg)', fontSize: '0.75rem' }}>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Demo Credentials:</p>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            <strong>Admin:</strong> admin@credflow.io / Admin@123<br/>
-            <strong>Analyst:</strong> analyst@credflow.io / Analyst@123<br/>
-            <strong>Viewer:</strong> viewer@credflow.io / Viewer@123
-          </p>
-        </div>
+        {process.env.NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS === 'true' && (
+          <div style={{ marginTop: '2rem', padding: '1rem', background: 'var(--bg-glass)', borderRadius: 'var(--radius-lg)', fontSize: '0.75rem' }}>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Demo Credentials:</p>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              <strong>Admin:</strong> admin@credflow.io / Admin@123<br/>
+              <strong>Analyst:</strong> analyst@credflow.io / Analyst@123<br/>
+              <strong>Viewer:</strong> viewer@credflow.io / Viewer@123<br/>
+              <strong>Second NBFC admin:</strong> admin@smegrowth.in / Admin@123
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

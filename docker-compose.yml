@@ -1,0 +1,17 @@
+services:
+  credflow:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS: "true"
+    ports:
+      - "3000:3000"
+    environment:
+      # Leave empty to auto-generate one stored in the data volume.
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      SEED_DEMO_DATA: "true"
+    volumes:
+      - credflow-data:/data
+
+volumes:
+  credflow-data:
