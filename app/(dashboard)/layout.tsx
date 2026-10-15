@@ -1,16 +1,19 @@
-import Sidebar from '@/components/Sidebar'
+import prisma from '@/lib/db'
+import { requirePageSession } from '@/lib/auth'
+import AppShell from '@/components/AppShell'
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const session = await requirePageSession()
+  const awaitingChecker = await prisma.loanApplication.count({
+    where: { nbfcId: session.nbfcId, status: 'PENDING_APPROVAL' },
+  })
+
   return (
-    <div className="app-container">
-      <Sidebar />
-      <main className="main-content">
-        {children}
-      </main>
-    </div>
+    <AppShell
+      user={{ name: session.name, email: session.email, role: session.role, nbfcName: session.nbfcName }}
+      awaitingChecker={awaitingChecker}
+    >
+      {children}
+    </AppShell>
   )
 }

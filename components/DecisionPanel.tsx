@@ -2,289 +2,277 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Check, Cpu, Lock, RotateCcw, ShieldCheck, Undo2, X } from 'lucide-react'
+import { Alert, Badge } from '@/components/ui'
+import { DECISION, inr } from '@/lib/format'
 
-type DecisionPanelProps = {
+type Props = {
   applicationId: string
   currentStatus: string
   hasDecision: boolean
   systemDecision?: string
   recommendedAmount?: number
+  requestedTenure: number
+  defaultRate: number
   userRole: string
   checker?: { pending: boolean; reasons: string[]; makerName: string; canCheck: boolean; blockedReason: string | null } | null
   pendingSanction?: { amount: number; tenure: number; interestRate: number; overrideReason: string | null } | null
 }
 
-const formatINR = (n: number) => `₹${(n / 100000).toFixed(1)}L`
+type Mode = 'idle' | 'approve' | 'reject'
 
-export default function DecisionPanel({ 
-  applicationId, 
-  currentStatus, 
-  hasDecision, 
-  systemDecision,
-  recommendedAmount,
-  userRole,
-  checker,
-  pendingSanction,
-}: DecisionPanelProps) {
+const OUTCOME_MESSAGE: Record<string, string> = {
+  SANCTIONED: 'Sanctioned.',
+  PENDING_APPROVAL: 'Submitted for checker approval.',
+  REJECTED: 'Application rejected.',
+  REFERRED: 'Referred for further review.',
+  RETURNED: 'Returned to the maker for review.',
+}
+
+export default function DecisionPanel({
+  applicationId, currentStatus, hasDecision, systemDecision, recommendedAmount, requestedTenure, defaultRate,
+  userRole, checker, pendingSanction,
+}: Props) {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
-  const [action, setAction] = useState('')
-  const [showApprovalForm, setShowApprovalForm] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [mode, setMode] = useState<Mode>('idle')
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [notice, setNotice] = useState('')
 
-  // Approval form fields
-  const [sanctionedAmount, setSanctionedAmount] = useState(recommendedAmount?.toString() || '')
-  const [sanctionedTenure, setSanctionedTenure] = useState('')
-  const [interestRate, setInterestRate] = useState('14.0')
-  const [processingFee, setProcessingFee] = useState('2.0')
+  const [amount, setAmount] = useState(recommendedAmount ? String(Math.round(recommendedAmount)) : '')
+  const [tenure, setTenure] = useState(String(requestedTenure))
+  const [rate, setRate] = useState(String(defaultRate))
+  const [fee, setFee] = useState('2.0')
   const [conditions, setConditions] = useState('')
   const [overrideReason, setOverrideReason] = useState('')
-  const [checkerRemarks, setCheckerRemarks] = useState('')
+  const [remarks, setRemarks] = useState('')
 
-  const runDecisionEngine = async () => {
-    setLoading(true)
+  const run = async (label: string, url: string, body?: unknown) => {
+    setBusy(label)
     setError('')
-    setSuccess('')
+    setNotice('')
     try {
-      const res = await fetch(`/api/applications/${applicationId}/decide`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || 'Failed to run decision')
-        return
-      }
-      setSuccess(`Underwriting engine completed: Score ${data.decision.creditScore}/100 → ${data.decision.decision}`)
-      setTimeout(() => router.refresh(), 1500)
-    } catch {
-      setError('Something went wrong')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const processAction = async (selectedAction: string) => {
-    setLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      const body: Record<string, unknown> = { action: selectedAction }
-      if (selectedAction === 'APPROVE') {
-        body.sanctionedAmount = sanctionedAmount
-        body.sanctionedTenure = sanctionedTenure
-        body.interestRate = interestRate
-        body.processingFee = processingFee
-        body.conditions = conditions
-      }
-      if (overrideReason) body.overrideReason = overrideReason
-      if (checkerRemarks && (selectedAction === 'CONFIRM' || selectedAction === 'RETURN')) body.remarks = checkerRemarks
-
-      const res = await fetch(`/api/applications/${applicationId}/process`, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: body ? JSON.stringify(body) : undefined,
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data.error || 'Failed to process')
+        setError(data.error || 'Something went wrong')
         return
       }
-      const messages: Record<string, string> = {
-        SANCTIONED: 'Application sanctioned',
-        PENDING_APPROVAL: `Submitted for checker approval: ${(data.checkerReasons || []).join('; ')}`,
-        REJECTED: 'Application rejected',
-        REFERRED: 'Application referred for review',
-        RETURNED: 'Sanction returned to the maker for review',
+      if (data.outcome) {
+        setNotice(
+          data.outcome === 'PENDING_APPROVAL' && data.checkerReasons?.length
+            ? `Submitted for checker approval: ${data.checkerReasons.join('; ')}.`
+            : OUTCOME_MESSAGE[data.outcome] ?? 'Done.'
+        )
+      } else if (data.decision) {
+        setNotice(`Engine finished: score ${data.decision.creditScore}, ${DECISION[data.decision.decision]?.label.toLowerCase() ?? data.decision.decision}.`)
       }
-      setSuccess(messages[data.outcome] || 'Done')
-      setTimeout(() => router.refresh(), 1500)
+      setMode('idle')
+      router.refresh()
     } catch {
-      setError('Something went wrong')
+      setError('Could not reach the server. Please try again.')
     } finally {
-      setLoading(false)
+      setBusy(null)
     }
   }
 
-  const isViewOnly = userRole === 'VIEWER'
-  const canProcess = ['APPLIED', 'UNDER_REVIEW'].includes(currentStatus)
+  const evaluate = () => run('evaluate', `/api/applications/${applicationId}/decide`)
+  const decide = (body: Record<string, unknown>) => run(String(body.action), `/api/applications/${applicationId}/process`, body)
+
   const isTerminal = ['SANCTIONED', 'REJECTED', 'WITHDRAWN'].includes(currentStatus)
+  const canAct = ['APPLIED', 'UNDER_REVIEW'].includes(currentStatus)
+  const isOverride = (action: 'APPROVE' | 'REJECT') => !!systemDecision && systemDecision !== action
 
-  if (isTerminal) {
-    return (
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Underwriting Actions</h3>
-        </div>
-        <div style={{textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-muted)'}}>
-          <p>This application has been <strong>{currentStatus.toLowerCase()}</strong>. No further actions available.</p>
-        </div>
-      </div>
-    )
-  }
+  const header = (
+    <div className="card-head">
+      <h2 className="card-title">Decision</h2>
+      {systemDecision && <span className="small muted">Engine: <strong className="text-2">{DECISION[systemDecision]?.label ?? systemDecision}</strong></span>}
+    </div>
+  )
 
+  const messages = (
+    <>
+      {error && <Alert tone="danger" className="mb-4">{error}</Alert>}
+      {notice && <Alert tone="success" className="mb-4">{notice}</Alert>}
+    </>
+  )
+
+  // ── Checker view ──
   if (currentStatus === 'PENDING_APPROVAL' && checker?.pending) {
     return (
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Checker Approval</h3>
-          <span className="badge badge-warning">Awaiting checker</span>
+      <section className="card" aria-label="Checker approval">
+        <div className="card-head">
+          <h2 className="card-title">Checker approval</h2>
+          <Badge tone="accent" dot>Awaiting checker</Badge>
         </div>
-        {error && <div className="alert alert-danger mb-4"><span>{error}</span></div>}
-        {success && <div className="alert alert-success mb-4"><span>{success}</span></div>}
-        <p style={{fontSize: '0.875rem', marginBottom: 'var(--space-3)'}}>
-          <strong>{checker.makerName}</strong> approved a sanction
-          {pendingSanction && <> of <strong>{formatINR(pendingSanction.amount)}</strong> for {pendingSanction.tenure} months at {pendingSanction.interestRate}% p.a.</>}.
-          A second approver is required because:
-        </p>
-        <ul style={{fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 'var(--space-4)', paddingLeft: 'var(--space-5)'}}>
-          {checker.reasons.map(r => <li key={r}>{r}</li>)}
-          {pendingSanction?.overrideReason && <li>Maker&apos;s override reason: {pendingSanction.overrideReason}</li>}
-        </ul>
-        {checker.canCheck ? (
+        <div className="card-body">
+          {messages}
+          <p className="text-2">
+            <strong className="strong">{checker.makerName}</strong> approved
+            {pendingSanction && <> <strong className="strong num">{inr(pendingSanction.amount)}</strong> for {pendingSanction.tenure} months at {pendingSanction.interestRate}% p.a.</>}
+          </p>
+          <div className="section-label mt-4">Second approval required because</div>
+          <ul className="reason-list">
+            {checker.reasons.map(r => <li key={r} className="reason note"><ShieldCheck aria-hidden />{r}</li>)}
+            {pendingSanction?.overrideReason && <li className="reason bad"><RotateCcw aria-hidden />Override reason: {pendingSanction.overrideReason}</li>}
+          </ul>
+
+          {checker.canCheck ? (
+            <div className="stack-sm mt-6">
+              <div className="field">
+                <label className="label" htmlFor="checker-remarks">Remarks <span className="muted" style={{ fontWeight: 400 }}>(required to return)</span></label>
+                <textarea id="checker-remarks" className="textarea" rows={3} value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Verified sanction terms against the appraisal" />
+              </div>
+              <button className="btn btn-success btn-block" disabled={!!busy} onClick={() => decide({ action: 'CONFIRM', remarks: remarks || undefined })}>
+                {busy === 'CONFIRM' ? <span className="spinner" aria-hidden /> : <Check aria-hidden />} Confirm sanction
+              </button>
+              <button className="btn btn-secondary btn-block" disabled={!!busy || !remarks.trim()} onClick={() => decide({ action: 'RETURN', remarks })}>
+                {busy === 'RETURN' ? <span className="spinner" aria-hidden /> : <Undo2 aria-hidden />} Return to maker
+              </button>
+            </div>
+          ) : (
+            <Alert tone="info" className="mt-6">{checker.blockedReason}</Alert>
+          )}
+        </div>
+      </section>
+    )
+  }
+
+  // ── Final states ──
+  if (isTerminal) {
+    return (
+      <section className="card" aria-label="Decision">
+        {header}
+        <div className="card-body">
+          <p className="text-2 row"><Lock size={15} aria-hidden /> This application is {currentStatus.toLowerCase()}. No further actions.</p>
+        </div>
+      </section>
+    )
+  }
+
+  if (userRole === 'VIEWER') {
+    return (
+      <section className="card" aria-label="Decision">
+        {header}
+        <div className="card-body"><p className="text-2 row"><Lock size={15} aria-hidden /> Read-only access. An analyst or admin can act on this application.</p></div>
+      </section>
+    )
+  }
+
+  // ── Maker view ──
+  return (
+    <section className="card" aria-label="Decision">
+      {header}
+      <div className="card-body">
+        {messages}
+
+        {!hasDecision && canAct && (
           <>
-            <div className="form-group" style={{marginBottom: 'var(--space-3)'}}>
-              <label className="form-label" htmlFor="checker-remarks">Remarks (required to return)</label>
-              <textarea id="checker-remarks" className="form-input" rows={2} value={checkerRemarks} onChange={e => setCheckerRemarks(e.target.value)} />
-            </div>
-            <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--space-3)'}}>
-              <button className="btn btn-primary" style={{background: 'var(--accent-green)', borderColor: 'var(--accent-green)'}} disabled={loading} onClick={() => processAction('CONFIRM')}>
-                ✓ Confirm Sanction
-              </button>
-              <button className="btn btn-ghost" style={{borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)'}} disabled={loading || !checkerRemarks.trim()} onClick={() => processAction('RETURN')}>
-                ↩ Return to Maker
-              </button>
-            </div>
+            <p className="text-2">Score this application under your active credit policy. Fraud checks, the bureau overlay and loan sizing all run together.</p>
+            <button className="btn btn-primary btn-block mt-4" onClick={evaluate} disabled={!!busy}>
+              {busy === 'evaluate' ? <><span className="spinner" aria-hidden /> Running engine…</> : <><Cpu aria-hidden /> Run underwriting engine</>}
+            </button>
           </>
-        ) : (
-          <p className="text-muted" style={{fontSize: '0.875rem'}}>{checker.blockedReason}</p>
+        )}
+
+        {hasDecision && canAct && mode === 'idle' && (
+          <div className="stack-sm">
+            <button className="btn btn-success btn-block" onClick={() => setMode('approve')} disabled={!!busy}>
+              <Check aria-hidden /> Approve & sanction
+            </button>
+            <button className="btn btn-secondary btn-block" onClick={() => decide({ action: 'REFER' })} disabled={!!busy}>
+              {busy === 'REFER' ? <span className="spinner" aria-hidden /> : <RotateCcw aria-hidden />} Refer for review
+            </button>
+            <button
+              className="btn btn-danger btn-block"
+              disabled={!!busy}
+              onClick={() => (isOverride('REJECT') ? setMode('reject') : decide({ action: 'REJECT' }))}
+            >
+              {busy === 'REJECT' ? <span className="spinner" aria-hidden /> : <X aria-hidden />} Reject
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={evaluate} disabled={!!busy} style={{ alignSelf: 'center' }}>
+              {busy === 'evaluate' ? <span className="spinner" aria-hidden /> : <Cpu aria-hidden />} Re-run engine
+            </button>
+          </div>
+        )}
+
+        {mode !== 'idle' && (
+          <form
+            className="stack-sm fade-in"
+            style={{ gap: 'var(--space-4)' }}
+            onSubmit={e => {
+              e.preventDefault()
+              if (mode === 'approve') {
+                decide({
+                  action: 'APPROVE',
+                  sanctionedAmount: amount,
+                  sanctionedTenure: tenure,
+                  interestRate: rate,
+                  processingFee: fee,
+                  conditions,
+                  overrideReason: isOverride('APPROVE') ? overrideReason : undefined,
+                })
+              } else {
+                decide({ action: 'REJECT', overrideReason })
+              }
+            }}
+          >
+            <div className="strong">{mode === 'approve' ? 'Sanction terms' : 'Reject against recommendation'}</div>
+
+            {isOverride(mode === 'approve' ? 'APPROVE' : 'REJECT') && (
+              <Alert tone="warning" title={`Overriding the engine's ${DECISION[systemDecision!]?.label.toLowerCase()} recommendation`}>
+                <div className="field mt-2">
+                  <label className="sr-only" htmlFor="override-reason">Reason for override</label>
+                  <textarea id="override-reason" className="textarea" rows={2} required value={overrideReason} onChange={e => setOverrideReason(e.target.value)} placeholder="Reason for override (required, recorded in the audit trail)" />
+                </div>
+              </Alert>
+            )}
+
+            {mode === 'approve' && (
+              <>
+                <div className="field">
+                  <label className="label" htmlFor="amount">Sanctioned amount</label>
+                  <div className="input-affix">
+                    <span>₹</span>
+                    <input id="amount" className="input has-prefix num" type="number" min={1} required value={amount} onChange={e => setAmount(e.target.value)} />
+                  </div>
+                  {amount && <span className="hint">{inr(Number(amount))}{recommendedAmount ? ` · engine recommended ${inr(recommendedAmount)}` : ''}</span>}
+                </div>
+                <div className="form-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
+                  <div className="field">
+                    <label className="label" htmlFor="tenure">Tenure</label>
+                    <div className="input-affix"><input id="tenure" className="input num" type="number" min={1} required value={tenure} onChange={e => setTenure(e.target.value)} style={{ paddingRight: 34 }} /><span>mo</span></div>
+                  </div>
+                  <div className="field">
+                    <label className="label" htmlFor="rate">Rate</label>
+                    <div className="input-affix"><input id="rate" className="input num" type="number" step="0.1" required value={rate} onChange={e => setRate(e.target.value)} style={{ paddingRight: 28 }} /><span>%</span></div>
+                  </div>
+                  <div className="field">
+                    <label className="label" htmlFor="fee">Fee</label>
+                    <div className="input-affix"><input id="fee" className="input num" type="number" step="0.1" value={fee} onChange={e => setFee(e.target.value)} style={{ paddingRight: 28 }} /><span>%</span></div>
+                  </div>
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="conditions">Conditions <span className="muted" style={{ fontWeight: 400 }}>(one per line)</span></label>
+                  <textarea id="conditions" className="textarea" rows={3} value={conditions} onChange={e => setConditions(e.target.value)} placeholder={'Post-dated cheques for 3 EMIs\nQuarterly stock statements'} />
+                </div>
+              </>
+            )}
+
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setMode('idle')} disabled={!!busy}>Cancel</button>
+              <button type="submit" className={mode === 'approve' ? 'btn btn-success' : 'btn btn-danger'} disabled={!!busy}>
+                {busy ? <span className="spinner" aria-hidden /> : mode === 'approve' ? <Check aria-hidden /> : <X aria-hidden />}
+                {mode === 'approve' ? 'Confirm sanction' : 'Confirm rejection'}
+              </button>
+            </div>
+          </form>
         )}
       </div>
-    )
-  }
-
-  if (isViewOnly) {
-    return (
-      <div className="card">
-        <div className="card-header"><h3 className="card-title">Underwriting Actions</h3></div>
-        <div style={{textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-muted)'}}>
-          <p>Read-only access. Contact an Admin or Analyst to process this application.</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="card">
-      <div className="card-header">
-        <h3 className="card-title">Underwriting Actions</h3>
-        <span className="badge badge-primary">{currentStatus.replace('_', ' ')}</span>
-      </div>
-
-      {error && <div className="alert alert-danger mb-4"><span>{error}</span></div>}
-      {success && <div className="alert alert-success mb-4"><span>{success}</span></div>}
-
-      {/* Step 1: Run Decision Engine */}
-      {!hasDecision && canProcess && (
-        <div style={{marginBottom: 'var(--space-4)'}}>
-          <p style={{fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 'var(--space-3)'}}>
-            Run the underwriting recommendation engine to generate a score and eligibility assessment.
-          </p>
-          <button className="btn btn-primary" onClick={runDecisionEngine} disabled={loading} style={{width: '100%'}}>
-            {loading ? <><span className="spinner" style={{width: 16, height: 16}}></span> Running...</> : '⚡ Run Underwriting Engine'}
-          </button>
-        </div>
-      )}
-
-      {/* Step 2: Process Decision */}
-      {hasDecision && canProcess && !showApprovalForm && (
-        <div>
-          <p style={{fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 'var(--space-3)'}}>
-            System recommends: <strong style={{color: systemDecision === 'APPROVE' ? 'var(--accent-green)' : systemDecision === 'REJECT' ? 'var(--accent-red)' : 'var(--accent-yellow)'}}>{systemDecision}</strong>
-          </p>
-          <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--space-3)'}}>
-            <button className="btn btn-primary" style={{background: 'var(--accent-green)', borderColor: 'var(--accent-green)'}} onClick={() => { setAction('APPROVE'); setShowApprovalForm(true) }}>
-              ✓ Approve & Sanction
-            </button>
-            <button className="btn btn-ghost" style={{borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)'}} onClick={() => processAction('REFER')}>
-              ↻ Refer for Review
-            </button>
-            <button className="btn btn-ghost" style={{borderColor: 'var(--accent-red)', color: 'var(--accent-red)'}} onClick={() => {
-              if (systemDecision === 'APPROVE') {
-                setAction('REJECT')
-                setShowApprovalForm(true) // need override reason
-              } else {
-                processAction('REJECT')
-              }
-            }}>
-              ✕ Reject
-            </button>
-          </div>
-          {/* Re-run decision */}
-          <button className="btn btn-ghost btn-sm" onClick={runDecisionEngine} disabled={loading} style={{width: '100%', marginTop: 'var(--space-3)'}}>
-            {loading ? 'Running...' : '↻ Re-run Underwriting Engine'}
-          </button>
-        </div>
-      )}
-
-      {/* Approval / Override Form */}
-      {showApprovalForm && (
-        <div className="animate-fadeIn">
-          <h4 style={{fontWeight: 600, marginBottom: 'var(--space-4)', color: action === 'APPROVE' ? 'var(--accent-green)' : 'var(--accent-red)'}}>
-            {action === 'APPROVE' ? '✓ Sanction Details' : '✕ Rejection Override'}
-          </h4>
-
-          {/* Override warning */}
-          {systemDecision && systemDecision !== action && (
-            <div className="alert alert-warning mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" /></svg>
-              <div>
-                <strong>System Override:</strong> You are overriding the system&apos;s {systemDecision} recommendation.
-                <div className="form-group" style={{marginTop: 'var(--space-2)'}}>
-                  <input className="form-input" value={overrideReason} onChange={e => setOverrideReason(e.target.value)} placeholder="Reason for override (required)" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {action === 'APPROVE' && (
-            <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--space-3)'}}>
-              <div className="form-group">
-                <label className="form-label">Sanctioned Amount (₹)</label>
-                <input className="form-input" type="number" value={sanctionedAmount} onChange={e => setSanctionedAmount(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Tenure (months)</label>
-                <input className="form-input" type="number" value={sanctionedTenure} onChange={e => setSanctionedTenure(e.target.value)} />
-              </div>
-              <div className="grid-2" style={{gap: 'var(--space-3)'}}>
-                <div className="form-group">
-                  <label className="form-label">Interest Rate (% p.a.)</label>
-                  <input className="form-input" type="number" step="0.1" value={interestRate} onChange={e => setInterestRate(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Processing Fee (%)</label>
-                  <input className="form-input" type="number" step="0.1" value={processingFee} onChange={e => setProcessingFee(e.target.value)} />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Conditions (one per line)</label>
-                <textarea className="form-input" rows={3} value={conditions} onChange={e => setConditions(e.target.value)} placeholder={"Submission of post-dated cheques\nQuarterly financial review\nMaintain minimum balance"} style={{resize: 'vertical'}} />
-              </div>
-            </div>
-          )}
-
-          <div style={{display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-4)'}}>
-            <button className="btn btn-ghost" onClick={() => { setShowApprovalForm(false); setAction('') }}>Cancel</button>
-            <button
-              className="btn btn-primary"
-              style={action === 'REJECT' ? {background: 'var(--accent-red)', borderColor: 'var(--accent-red)'} : {}}
-              disabled={loading || (systemDecision !== action && !overrideReason)}
-              onClick={() => processAction(action)}
-            >
-              {loading ? 'Processing...' : action === 'APPROVE' ? 'Confirm Sanction' : 'Confirm Rejection'}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    </section>
   )
 }

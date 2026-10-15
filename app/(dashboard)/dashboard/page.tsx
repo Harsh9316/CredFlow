@@ -1,231 +1,226 @@
-import prisma from '@/lib/db'
 import Link from 'next/link'
+import { ArrowRight, BadgeCheck, Clock3, FileText, Plus, Scale, ShieldAlert, UserCheck } from 'lucide-react'
+import prisma from '@/lib/db'
 import { requirePageSession } from '@/lib/auth'
+import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge } from '@/components/ui'
+import { date, inr } from '@/lib/format'
 
-async function getDashboardStats(nbfcId: string) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+export const metadata = { title: 'Overview' }
 
-  const [
-    totalApplications,
-    todayApplications,
-    approvedCount,
-    rejectedCount,
-    underReviewCount,
-    sanctionedCount,
-    recentApplications
-  ] = await Promise.all([
+async function getOverview(nbfcId: string) {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+
+  const [total, last30, byStatus, sanctioned, decided, awaitingChecker, toReview, recent, recommendations] = await Promise.all([
     prisma.loanApplication.count({ where: { nbfcId } }),
-    prisma.loanApplication.count({
-      where: { nbfcId, appliedAt: { gte: today } }
+    prisma.loanApplication.count({ where: { nbfcId, appliedAt: { gte: since } } }),
+    prisma.loanApplication.groupBy({ by: ['status'], where: { nbfcId }, _count: { _all: true } }),
+    prisma.approval.aggregate({
+      where: { application: { nbfcId }, finalDecision: 'APPROVE', status: 'CONFIRMED' },
+      _sum: { sanctionedAmount: true },
+      _count: { _all: true },
     }),
-    prisma.loanApplication.count({
-      where: { nbfcId, status: { in: ['APPROVED', 'SANCTIONED'] } }
+    prisma.loanApplication.findMany({ where: { nbfcId, decidedAt: { not: null } }, select: { appliedAt: true, decidedAt: true } }),
+    prisma.loanApplication.findMany({
+      where: { nbfcId, status: 'PENDING_APPROVAL' },
+      include: { borrower: { select: { businessName: true } }, approval: { select: { sanctionedAmount: true, user: { select: { name: true } } } } },
+      orderBy: { updatedAt: 'asc' },
+      take: 5,
     }),
-    prisma.loanApplication.count({
-      where: { nbfcId, status: 'REJECTED' }
-    }),
-    prisma.loanApplication.count({
-      where: { nbfcId, status: 'UNDER_REVIEW' }
-    }),
-    prisma.loanApplication.count({
-      where: { nbfcId, status: 'SANCTIONED' }
+    prisma.loanApplication.findMany({
+      where: { nbfcId, status: { in: ['APPLIED', 'UNDER_REVIEW'] } },
+      include: { borrower: { select: { businessName: true } }, creditDecision: { select: { decision: true, creditScore: true } } },
+      orderBy: { appliedAt: 'asc' },
+      take: 6,
     }),
     prisma.loanApplication.findMany({
       where: { nbfcId },
-      take: 10,
-      orderBy: { appliedAt: 'desc' },
       include: {
-        borrower: {
-          select: { businessName: true, industry: true }
-        }
-      }
-    })
+        borrower: { select: { businessName: true, industry: true, city: true } },
+        creditDecision: { select: { creditScore: true, decision: true } },
+      },
+      orderBy: { appliedAt: 'desc' },
+      take: 8,
+    }),
+    prisma.creditDecision.groupBy({ by: ['decision'], where: { application: { nbfcId } }, _count: { _all: true } }),
   ])
 
-  // Calculate approval rate
-  const decidedApplications = approvedCount + rejectedCount
-  const approvalRate = decidedApplications > 0 
-    ? Math.round((approvedCount / decidedApplications) * 100) 
-    : 0
-
-  // Calculate average TAT (days from applied to decided)
-  const decidedApps = await prisma.loanApplication.findMany({
-    where: { nbfcId, decidedAt: { not: null } },
-    select: { appliedAt: true, decidedAt: true }
-  })
-
-  let avgTAT = 0
-  if (decidedApps.length > 0) {
-    const totalDays = decidedApps.reduce((sum, app) => {
-      const days = Math.ceil((app.decidedAt!.getTime() - app.appliedAt.getTime()) / (1000 * 60 * 60 * 24))
-      return sum + days
-    }, 0)
-    avgTAT = Math.round(totalDays / decidedApps.length)
-  }
+  const count = (s: string) => byStatus.find(b => b.status === s)?._count._all ?? 0
+  const approvedCount = count('SANCTIONED') + count('APPROVED')
+  const rejectedCount = count('REJECTED')
+  const decidedCount = approvedCount + rejectedCount
+  const avgTat = decided.length
+    ? decided.reduce((sum, a) => sum + (a.decidedAt!.getTime() - a.appliedAt.getTime()), 0) / decided.length / 86_400_000
+    : null
 
   return {
-    totalApplications,
-    todayApplications,
-    approvedCount,
-    rejectedCount,
-    underReviewCount,
-    sanctionedCount,
-    approvalRate,
-    avgTAT,
-    recentApplications
+    total,
+    last30,
+    inReview: count('APPLIED') + count('UNDER_REVIEW'),
+    awaitingCount: count('PENDING_APPROVAL'),
+    approvalRate: decidedCount ? Math.round((approvedCount / decidedCount) * 100) : null,
+    decidedCount,
+    sanctionedAmount: sanctioned._sum.sanctionedAmount ?? 0,
+    sanctionedCount: sanctioned._count._all,
+    avgTat,
+    awaitingChecker,
+    toReview,
+    recent,
+    recommendations: Object.fromEntries(recommendations.map(r => [r.decision, r._count._all])) as Record<string, number>,
   }
 }
 
-function formatAmount(amount: number): string {
-  if (amount >= 10000000) {
-    return `₹${(amount / 10000000).toFixed(2)}Cr`
-  } else if (amount >= 100000) {
-    return `₹${(amount / 100000).toFixed(1)}L`
-  }
-  return `₹${amount.toLocaleString()}`
-}
-
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  }).format(date)
-}
-
-function getStatusBadge(status: string) {
-  const statusConfig: Record<string, { class: string; label: string }> = {
-    APPLIED: { class: 'badge-primary', label: 'Applied' },
-    UNDER_REVIEW: { class: 'badge-warning', label: 'Under Review' },
-    PENDING_DOCS: { class: 'badge-gray', label: 'Pending Docs' },
-    PENDING_APPROVAL: { class: 'badge-warning', label: 'Awaiting Checker' },
-    APPROVED: { class: 'badge-success', label: 'Approved' },
-    REJECTED: { class: 'badge-danger', label: 'Rejected' },
-    SANCTIONED: { class: 'badge-purple', label: 'Sanctioned' },
-    WITHDRAWN: { class: 'badge-gray', label: 'Withdrawn' }
-  }
-  const config = statusConfig[status] || { class: 'badge-gray', label: status }
-  return <span className={`badge ${config.class}`}>{config.label}</span>
-}
-
-function getPriorityBadge(priority: string) {
-  if (priority === 'URGENT') return <span className="badge badge-danger">Urgent</span>
-  if (priority === 'HIGH') return <span className="badge badge-warning">High</span>
-  return null
+function greeting() {
+  const h = Number(new Intl.DateTimeFormat('en-IN', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date()))
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
 export default async function DashboardPage() {
   const session = await requirePageSession()
-  const stats = await getDashboardStats(session.nbfcId)
+  const o = await getOverview(session.nbfcId)
+  const recTotal = (o.recommendations.APPROVE ?? 0) + (o.recommendations.REFER ?? 0) + (o.recommendations.REJECT ?? 0)
+  const queueEmpty = o.awaitingChecker.length === 0 && o.toReview.length === 0
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Overview of your credit underwriting operations</p>
-        </div>
-        <div className="page-actions">
-          <Link href="/applications/new" className="btn btn-primary">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width: 18, height: 18}}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            New Application
-          </Link>
-        </div>
+      <PageHeader
+        title={`${greeting()}, ${session.name.split(' ')[0]}`}
+        description={`Here's where ${session.nbfcName}'s credit pipeline stands today.`}
+        actions={
+          session.role !== 'VIEWER' && (
+            <Link href="/applications/new" className="btn btn-primary"><Plus aria-hidden /> New application</Link>
+          )
+        }
+      />
+
+      <div className="stats">
+        <Stat label="Applications" value={o.total} icon={<FileText />} hint={<><strong>{o.last30}</strong> in the last 30 days</>} />
+        <Stat label="In review" value={o.inReview} icon={<Clock3 />} hint={o.avgTat !== null ? <>Avg. decision time <strong>{o.avgTat.toFixed(1)} days</strong></> : 'No decisions yet'} />
+        <Stat
+          label="Approval rate"
+          value={o.approvalRate !== null ? `${o.approvalRate}%` : '—'}
+          icon={<Scale />}
+          hint={<>of <strong>{o.decidedCount}</strong> decided applications</>}
+        />
+        <Stat label="Sanctioned" value={inr(o.sanctionedAmount)} icon={<BadgeCheck />} hint={<>across <strong>{o.sanctionedCount}</strong> loans</>} />
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <div className="stat-value">{stats.totalApplications}</div>
-          <div className="stat-label">Total Applications</div>
-          <div className="stat-change positive">+{stats.todayApplications} today</div>
-        </div>
+      <div className="split" style={{ '--rail': '360px' } as React.CSSProperties}>
+        <Card
+          title="Recent applications"
+          actions={<Link href="/applications" className="btn btn-ghost btn-sm">View all <ArrowRight aria-hidden /></Link>}
+          flush
+        >
+          {o.recent.length === 0 ? (
+            <EmptyState icon={<FileText size={20} />} title="No applications yet" action={<Link href="/applications/new" className="btn btn-primary btn-sm"><Plus aria-hidden /> Create the first one</Link>}>
+              Applications created here or through the API will show up in this list.
+            </EmptyState>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Borrower</th>
+                    <th className="right">Amount</th>
+                    <th>Score</th>
+                    <th>Status</th>
+                    <th>Applied</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {o.recent.map(app => (
+                    <tr key={app.id} className="clickable">
+                      <td>
+                        <Link href={`/applications/${app.id}`} className="row-link cell-primary">{app.borrower.businessName}</Link>
+                        <div className="cell-sub">{app.applicationNo} · {app.borrower.industry}</div>
+                      </td>
+                      <td className="right num strong">{inr(app.requestedAmount)}</td>
+                      <td className="num">
+                        {app.creditDecision ? (
+                          <span className={app.creditDecision.creditScore >= 70 ? 'tone-success strong' : app.creditDecision.creditScore >= 50 ? 'tone-warning strong' : 'tone-danger strong'}>
+                            {app.creditDecision.creditScore}
+                          </span>
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td><StatusBadge status={app.status} /></td>
+                      <td className="muted">{date(app.appliedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
 
-        <div className="stat-card success">
-          <div className="stat-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="stat-value">{stats.approvedCount}</div>
-          <div className="stat-label">Approved / Sanctioned</div>
-          <div className="stat-change positive">{stats.approvalRate}% approval rate</div>
-        </div>
-
-        <div className="stat-card warning">
-          <div className="stat-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="stat-value">{stats.underReviewCount}</div>
-          <div className="stat-label">Under Review</div>
-          <div className="stat-change positive">Avg TAT: {stats.avgTAT} days</div>
-        </div>
-
-        <div className="stat-card danger">
-          <div className="stat-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="stat-value">{stats.rejectedCount}</div>
-          <div className="stat-label">Rejected</div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Recent Applications</h3>
-          <Link href="/applications" className="btn btn-ghost btn-sm">
-            View All
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width: 14, height: 14}}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-        </div>
-        <div className="table-container" style={{border: 'none'}}>
-          <table>
-            <thead>
-              <tr>
-                <th>Application No</th>
-                <th>Borrower</th>
-                <th>Industry</th>
-                <th>Amount</th>
-                <th>Tenure</th>
-                <th>Applied On</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.recentApplications.map((app) => (
-                <tr key={app.id}>
-                  <td style={{fontWeight: 500, color: 'var(--text-primary)'}}>{app.applicationNo}</td>
-                  <td>{app.borrower.businessName}</td>
-                  <td>{app.borrower.industry}</td>
-                  <td style={{fontFamily: 'var(--font-mono)'}}>{formatAmount(app.requestedAmount)}</td>
-                  <td>{app.requestedTenure} mo</td>
-                  <td>{formatDate(app.appliedAt)}</td>
-                  <td>{getStatusBadge(app.status)}</td>
-                  <td>{getPriorityBadge(app.priority)}</td>
-                  <td>
-                    <Link href={`/applications/${app.id}`} className="btn btn-ghost btn-sm">
-                      View
+        <div className="stack">
+          <Card title="Needs attention" description="Oldest first" flush>
+            {queueEmpty ? (
+              <EmptyState icon={<BadgeCheck size={20} />} title="All caught up">Nothing is waiting for review or a checker.</EmptyState>
+            ) : (
+              <ul>
+                {o.awaitingChecker.map(app => (
+                  <li key={app.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <Link href={`/applications/${app.id}`} className="between" style={{ padding: '12px 20px' }}>
+                      <span style={{ minWidth: 0 }}>
+                        <span className="cell-primary" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.borrower.businessName}</span>
+                        <span className="cell-sub">{inr(app.approval?.sanctionedAmount)} · submitted by {app.approval?.user.name}</span>
+                      </span>
+                      <Badge tone="accent"><UserCheck aria-hidden /> Check</Badge>
                     </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </li>
+                ))}
+                {o.toReview.map(app => (
+                  <li key={app.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <Link href={`/applications/${app.id}`} className="between" style={{ padding: '12px 20px' }}>
+                      <span style={{ minWidth: 0 }}>
+                        <span className="cell-primary" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.borrower.businessName}</span>
+                        <span className="cell-sub">
+                          {inr(app.requestedAmount)} · {app.creditDecision ? `scored ${app.creditDecision.creditScore}` : 'not yet evaluated'}
+                        </span>
+                      </span>
+                      {app.creditDecision
+                        ? <Badge tone="warning">Decide</Badge>
+                        : <Badge tone="info">Evaluate</Badge>}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {o.awaitingCount + o.inReview > o.awaitingChecker.length + o.toReview.length && (
+              <div className="card-foot">
+                <Link href="/applications?status=open" className="tone-accent strong">See all {o.awaitingCount + o.inReview} open applications</Link>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Engine recommendations" description="All evaluated applications">
+            {recTotal === 0 ? (
+              <p className="muted small">No applications evaluated yet.</p>
+            ) : (
+              <>
+                <div className="stacked-bar" role="img" aria-label="Share of approve, refer and reject recommendations">
+                  {(['APPROVE', 'REFER', 'REJECT'] as const).map(k => (
+                    <span key={k} style={{
+                      width: `${((o.recommendations[k] ?? 0) / recTotal) * 100}%`,
+                      background: k === 'APPROVE' ? 'var(--success)' : k === 'REFER' ? 'var(--warning)' : 'var(--danger)',
+                    }} />
+                  ))}
+                </div>
+                <div className="legend">
+                  {([['APPROVE', 'Approve', 'var(--success)'], ['REFER', 'Refer', 'var(--warning)'], ['REJECT', 'Reject', 'var(--danger)']] as const).map(([k, label, color]) => (
+                    <div key={k} className="legend-row">
+                      <span className="legend-swatch" style={{ background: color }} />
+                      <span>{label}</span>
+                      <span className="num strong">{o.recommendations[k] ?? 0}</span>
+                      <span className="num muted" style={{ width: 40, textAlign: 'right' }}>{Math.round(((o.recommendations[k] ?? 0) / recTotal) * 100)}%</span>
+                    </div>
+                  ))}
+                </div>
+                {(o.recommendations.REJECT ?? 0) > 0 && (
+                  <p className="small muted mt-4 row"><ShieldAlert size={14} aria-hidden /> Includes fraud hard-stops.</p>
+                )}
+              </>
+            )}
+          </Card>
         </div>
       </div>
     </>

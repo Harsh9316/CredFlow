@@ -1,17 +1,14 @@
+import { Terminal } from 'lucide-react'
 import prisma from '@/lib/db'
 import { requirePageSession } from '@/lib/auth'
 import { getActivePolicy } from '@/lib/policy'
 import type { CreditPolicy } from '@credflow/engine'
+import { Badge, Card, PageHeader } from '@/components/ui'
+import { COLLATERAL_LABEL, date, inr } from '@/lib/format'
 
-const collateralTypes = [
-  { key: 'LAP', label: 'Loan Against Property' },
-  { key: 'MACHINERY', label: 'Machinery' },
-  { key: 'INVOICE', label: 'Invoice Financing' },
-  { key: 'STOCK', label: 'Stock/Inventory' },
-  { key: 'FD', label: 'Fixed Deposit' },
-] as const
+export const metadata = { title: 'Credit policy' }
 
-const fraudRuleLabels: Record<keyof CreditPolicy['fraud']['rules'], string> = {
+const FRAUD_RULES: Record<keyof CreditPolicy['fraud']['rules'], string> = {
   panGstinMismatch: 'PAN does not match GSTIN',
   missingIdentity: 'No PAN or GSTIN',
   inflowSpike: 'Inflow spike',
@@ -19,21 +16,26 @@ const fraudRuleLabels: Record<keyof CreditPolicy['fraud']['rules'], string> = {
   excessiveBankFlow: 'Bank inflows far above declared turnover',
   newEntityLargeLoan: 'New entity, large loan',
   loanExceedsTurnover: 'Loan exceeds annual turnover',
-  gstinNotActive: 'GSTIN not active (needs GST connector)',
-  panNotVerified: 'PAN not verified (needs KYC connector)',
+  gstinNotActive: 'GSTIN not active',
+  panNotVerified: 'PAN not verified',
 }
 
-function describeRuleParams(key: string, rule: Record<string, unknown>): string {
+function ruleTrigger(key: string, rule: Record<string, unknown>): string {
   switch (key) {
-    case 'inflowSpike': return `Any month > ${rule.multipleOfAverage}× average (needs ${rule.minMonths}+ months)`
-    case 'turnoverBankShortfall': return `Bank / turnover < ${rule.minBankToTurnoverRatio}`
-    case 'excessiveBankFlow': return `Bank / turnover > ${rule.maxBankToTurnoverRatio}`
-    case 'newEntityLargeLoan': return `Vintage < ${rule.maxVintageMonths} months and amount > ₹${((rule.amountAbove as number) / 100000).toFixed(1)}L`
+    case 'inflowSpike': return `Any month above ${rule.multipleOfAverage}× the average (needs ${rule.minMonths}+ months of data)`
+    case 'turnoverBankShortfall': return `Annualised bank inflows below ${Math.round(Number(rule.minBankToTurnoverRatio) * 100)}% of declared turnover`
+    case 'excessiveBankFlow': return `Annualised bank inflows above ${rule.maxBankToTurnoverRatio}× declared turnover`
+    case 'newEntityLargeLoan': return `Under ${rule.maxVintageMonths} months old and requesting over ${inr(Number(rule.amountAbove))}`
+    case 'gstinNotActive': return 'GST network reports the GSTIN as cancelled, suspended or not found (needs a GST connector)'
+    case 'panNotVerified': return 'PAN fails verification (needs a KYC connector)'
+    case 'panGstinMismatch': return 'PAN embedded in the GSTIN differs from the PAN supplied'
+    case 'missingIdentity': return 'Neither PAN nor GSTIN supplied'
+    case 'loanExceedsTurnover': return 'Requested amount is more than annual turnover'
     default: return '—'
   }
 }
 
-const severityBadge = (s: string) => (s === 'CRITICAL' ? 'badge-danger' : s === 'WARNING' ? 'badge-warning' : 'badge-gray')
+const severityTone = (s: string) => (s === 'CRITICAL' ? 'danger' : s === 'WARNING' ? 'warning' : 'neutral') as 'danger' | 'warning' | 'neutral'
 
 export default async function SettingsPage() {
   const session = await requirePageSession()
@@ -45,284 +47,183 @@ export default async function SettingsPage() {
   })
 
   const s = policy.scoring
-  const scorecard = [
+  const banded = [
     { name: 'Cash flow', metric: 'Free cash flow ÷ (amount ÷ 12)', c: s.cashFlow },
     { name: 'EMI coverage', metric: 'Free cash flow ÷ EMI', c: s.emiCoverage },
     { name: 'Stability', metric: 'Inflow coefficient of variation', c: s.stability },
   ]
+  const a = policy.affordability
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Credit policy applied to every decision for {session.nbfcName}</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Credit policy"
+        description={`The rules the engine applies to every decision for ${session.nbfcName}.`}
+        badge={<Badge tone={policyId ? 'success' : 'neutral'} dot>{policyId ? 'Active' : 'Built-in default'}</Badge>}
+      />
 
-      {/* Active policy */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">{policy.name}</h3>
-          <span className="badge badge-primary">{policyId ? 'Active' : 'Built-in default'}</span>
-        </div>
-        {policy.description && <p className="text-muted" style={{marginBottom: 'var(--space-4)'}}>{policy.description}</p>}
-        <div className="settings-grid">
-          <div className="setting-item">
-            <div className="setting-label">Policy</div>
-            <div className="setting-value font-mono" style={{fontSize: '1.1rem'}}>{policy.id}@{policy.version}</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Stored with every decision for audits and backtesting</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Checksum (SHA-256)</div>
-            <div className="setting-value font-mono" style={{fontSize: '1.1rem'}} title={checksum}>{checksum.slice(0, 12)}…</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Changes whenever any rule changes</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Changing the policy</div>
-            <div className="font-mono text-xs" style={{marginTop: 'var(--space-2)'}}>npm run policy -- apply policies/&lt;file&gt;.yaml --nbfc &lt;CODE&gt;</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Policies are versioned YAML files, validated before they are applied</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Thresholds & affordability */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Decision Thresholds</h3>
-        </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <div className="setting-label">Approve</div>
-            <div className="setting-value" style={{color: 'var(--accent-green)'}}>≥{policy.decision.approveThreshold}</div>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Refer</div>
-            <div className="setting-value" style={{color: 'var(--accent-yellow)'}}>{policy.decision.referThreshold}–{policy.decision.approveThreshold - 1}</div>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Reject</div>
-            <div className="setting-value" style={{color: 'var(--accent-red)'}}>&lt;{policy.decision.referThreshold}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Affordability &amp; Loan Sizing</h3>
-        </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <div className="setting-label">EMI method</div>
-            <div className="setting-value" style={{fontSize: '1.1rem'}}>
-              {policy.affordability.method === 'amortized'
-                ? `Amortized @ ${policy.affordability.annualInterestRate}% p.a.`
-                : `Flat factor ${policy.affordability.flatFactor} (ignores interest)`}
-            </div>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Min EMI coverage</div>
-            <div className="setting-value">{policy.affordability.minEMICoverage}x</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Max EMI = free cash flow ÷ {policy.affordability.minEMICoverage}</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Unsecured sizing</div>
-            <div className="setting-value">{Math.round(policy.affordability.unsecuredHaircut * 100)}%</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>of cash-flow eligibility</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Collateral headroom</div>
-            <div className="setting-value">{policy.affordability.collateralHeadroom}x</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>of collateral cap, for secured loans</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Scorecard */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Scorecard (100 points)</h3>
-        </div>
-        <div className="table-container" style={{border: 'none'}}>
-          <table>
-            <thead>
-              <tr><th>Component</th><th>Metric</th><th>Max</th><th>Bands → points</th></tr>
-            </thead>
-            <tbody>
-              {scorecard.map(({ name, metric, c }) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td className="text-muted">{metric}</td>
-                  <td>{c.max}</td>
-                  <td className="font-mono text-xs">
-                    {c.bands.map(b => `${c.direction === 'higher-is-better' ? '≥' : '≤'}${b.threshold} → ${b.points}`).join(' · ')} · else {c.otherwise}
-                  </td>
-                </tr>
-              ))}
-              <tr>
-                <td>Collateral</td>
-                <td className="text-muted">Collateral cap ÷ amount</td>
-                <td>{s.collateral.max}</td>
-                <td className="font-mono text-xs">
-                  {s.collateral.coverageBands.map(b => `≥${b.threshold} → ${b.points}`).join(' · ')} · else {s.collateral.otherwise}
-                  {s.collateral.preferredTypes.length > 0 && ` · +${s.collateral.preferredTypeBonus} for ${s.collateral.preferredTypes.join('/')}`}
-                  {s.collateral.personalGuaranteeBonus > 0 && ` · +${s.collateral.personalGuaranteeBonus} for guarantee`}
-                </td>
-              </tr>
-              <tr>
-                <td>Profile</td>
-                <td className="text-muted">Vintage (months) + industry risk</td>
-                <td>{s.profile.max}</td>
-                <td className="font-mono text-xs">
-                  {s.profile.vintageBands.map(b => `≥${b.threshold}m → ${b.points}`).join(' · ')} · else {s.profile.vintageOtherwise}
-                  {` · industry LOW ${s.profile.industryPoints.LOW} / MEDIUM ${s.profile.industryPoints.MEDIUM} / HIGH ${s.profile.industryPoints.HIGH}`}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* LTV Limits */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">LTV Limits by Collateral Type</h3>
-        </div>
-        <div className="settings-grid">
-          {collateralTypes.map(({ key, label }) => (
-            <div key={key} className="setting-item">
-              <div className="setting-label">{label}</div>
-              <div className="setting-value">{policy.collateral.ltvLimits[key]}%</div>
-              <div style={{marginTop: 'var(--space-3)'}}>
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{width: `${policy.collateral.ltvLimits[key]}%`}}></div>
-                </div>
+      <div className="split" style={{ '--rail': '340px' } as React.CSSProperties}>
+        <div className="stack">
+          <Card title={policy.name} description={policy.description}>
+            <div className="tiles">
+              <div className="tile">
+                <div className="tile-label">Approve at</div>
+                <div className="figure tone-success">{policy.decision.approveThreshold}+</div>
+              </div>
+              <div className="tile">
+                <div className="tile-label">Refer between</div>
+                <div className="figure tone-warning">{policy.decision.referThreshold}–{policy.decision.approveThreshold - 1}</div>
+              </div>
+              <div className="tile">
+                <div className="tile-label">Reject below</div>
+                <div className="figure tone-danger">{policy.decision.referThreshold}</div>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
+            <dl className="kv kv-3 mt-6">
+              <div><dt>EMI method</dt><dd>{a.method === 'amortized' ? `Amortised at ${a.annualInterestRate}% p.a.` : `Flat factor ${a.flatFactor}`}</dd></div>
+              <div><dt>Min. EMI coverage</dt><dd>{a.minEMICoverage}x</dd></div>
+              <div><dt>Unsecured sizing</dt><dd>{Math.round(a.unsecuredHaircut * 100)}% of cash-flow eligibility</dd></div>
+              <div><dt>Collateral headroom</dt><dd>{a.collateralHeadroom}x of collateral cap</dd></div>
+              <div><dt>Max. inflow volatility</dt><dd>{Math.round(policy.explanations.maxInflowCV * 100)}%</dd></div>
+              <div><dt>Min. business vintage</dt><dd>{policy.explanations.minBusinessVintageMonths} months</dd></div>
+            </dl>
+          </Card>
 
-      {/* Industry Risk Bands */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Industry Risk Classification</h3>
-          <span className="badge badge-gray">Unlisted industries: {policy.industries.defaultBand}</span>
-        </div>
-        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)'}}>
-          {Object.entries(policy.industries.riskBands).map(([industry, risk]) => (
-            <div key={industry} style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-3)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)'}}>
-              <span>{industry}</span>
-              <span className={`badge ${risk === 'LOW' ? 'badge-success' : risk === 'MEDIUM' ? 'badge-warning' : 'badge-danger'}`}>
-                {risk}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Fraud rules */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Fraud Pre-checks</h3>
-          <span className="badge badge-gray">Hard stop at {policy.fraud.hardStopSeverity}</span>
-        </div>
-        <div className="table-container" style={{border: 'none'}}>
-          <table>
-            <thead>
-              <tr><th>Rule</th><th>Status</th><th>Severity</th><th>Trigger</th></tr>
-            </thead>
-            <tbody>
-              {Object.entries(policy.fraud.rules).map(([key, rule]) => (
-                <tr key={key}>
-                  <td>{fraudRuleLabels[key as keyof typeof fraudRuleLabels]}</td>
-                  <td>{rule.enabled ? 'On' : <span className="text-muted">Off</span>}</td>
-                  <td><span className={`badge ${severityBadge(rule.severity)}`}>{rule.severity}</span></td>
-                  <td className="text-xs text-muted">{describeRuleParams(key, rule as Record<string, unknown>)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Maker-checker */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Sanction Approvals (Maker-Checker)</h3>
-        </div>
-        <div className="settings-grid">
-          <div className="setting-item">
-            <div className="setting-label">Second approver above</div>
-            <div className="setting-value">
-              {policy.approvals.checkerRequiredAbove === null ? 'Never' : `₹${(policy.approvals.checkerRequiredAbove / 100000).toFixed(1)}L`}
-            </div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Sanctions above this need a checker</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Overrides need a checker</div>
-            <div className="setting-value">{policy.approvals.checkerRequiredForOverrides ? 'Yes' : 'No'}</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Approving against the system recommendation</p>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">Checker roles</div>
-            <div className="setting-value" style={{fontSize: '1.1rem'}}>{policy.approvals.checkerRoles.join(', ')}</div>
-            <p className="text-xs text-muted" style={{marginTop: 'var(--space-2)'}}>Always a different user from the maker</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Bureau */}
-      <div className="card settings-section">
-        <div className="card-header">
-          <h3 className="card-title">Bureau Overlay</h3>
-          <span className="badge badge-gray">Modifier only, never a gate</span>
-        </div>
-        <div className="settings-grid">
-          {policy.bureau.scoreBands.map(b => (
-            <div key={b.minScore} className="setting-item">
-              <div className="setting-label">Score ≥{b.minScore}</div>
-              <div className="setting-value">{b.modifier > 0 ? '+' : ''}{b.modifier}</div>
-            </div>
-          ))}
-          <div className="setting-item">
-            <div className="setting-label">Below all bands</div>
-            <div className="setting-value">{policy.bureau.otherwiseModifier}</div>
-          </div>
-          <div className="setting-item">
-            <div className="setting-label">DPD 90+ history</div>
-            <div className="setting-value">{policy.bureau.delinquencyModifier}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Version history */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Policy History</h3>
-        </div>
-        {history.length === 0 ? (
-          <p className="text-muted">No policy applied yet. Decisions use the built-in default ({policy.id}@{policy.version}).</p>
-        ) : (
-          <div className="table-container" style={{border: 'none'}}>
-            <table>
-              <thead>
-                <tr><th>Policy</th><th>Checksum</th><th>Activated</th><th>Decisions</th><th></th></tr>
-              </thead>
-              <tbody>
-                {history.map(h => (
-                  <tr key={h.id}>
-                    <td className="font-mono">{h.policyKey}@{h.version}</td>
-                    <td className="font-mono text-xs">{h.checksum.slice(0, 12)}…</td>
-                    <td className="text-muted">{h.activatedAt ? h.activatedAt.toLocaleDateString('en-IN') : '—'}</td>
-                    <td>{h._count.decisions}</td>
-                    <td>{h.isActive && <span className="badge badge-success">Active</span>}</td>
+          <Card title="Scorecard" description="Five components, 100 points in total" flush>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Component</th><th className="right">Max</th><th>Bands → points</th></tr></thead>
+                <tbody>
+                  {banded.map(({ name, metric, c }) => (
+                    <tr key={name}>
+                      <td><div className="cell-primary">{name}</div><div className="cell-sub">{metric}</div></td>
+                      <td className="right num strong">{c.max}</td>
+                      <td className="small" style={{ whiteSpace: 'normal' }}>
+                        <span className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                          {c.bands.map(b => <span key={b.threshold} className="code">{c.direction === 'higher-is-better' ? '≥' : '≤'}{b.threshold} → {b.points}</span>)}
+                          <span className="code">else {c.otherwise}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td><div className="cell-primary">Collateral</div><div className="cell-sub">Collateral cap ÷ amount</div></td>
+                    <td className="right num strong">{s.collateral.max}</td>
+                    <td className="small" style={{ whiteSpace: 'normal' }}>
+                      <span className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                        {s.collateral.coverageBands.map(b => <span key={b.threshold} className="code">≥{b.threshold} → {b.points}</span>)}
+                        <span className="code">else {s.collateral.otherwise}</span>
+                        {s.collateral.preferredTypes.length > 0 && <span className="muted">+{s.collateral.preferredTypeBonus} for {s.collateral.preferredTypes.join(', ')}</span>}
+                        {s.collateral.personalGuaranteeBonus > 0 && <span className="muted">· +{s.collateral.personalGuaranteeBonus} for a guarantee</span>}
+                      </span>
+                    </td>
                   </tr>
+                  <tr>
+                    <td><div className="cell-primary">Business profile</div><div className="cell-sub">Vintage + industry risk</div></td>
+                    <td className="right num strong">{s.profile.max}</td>
+                    <td className="small" style={{ whiteSpace: 'normal' }}>
+                      <span className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                        {s.profile.vintageBands.map(b => <span key={b.threshold} className="code">≥{b.threshold}m → {b.points}</span>)}
+                        <span className="code">else {s.profile.vintageOtherwise}</span>
+                        <span className="muted">+ industry: low {s.profile.industryPoints.LOW}, medium {s.profile.industryPoints.MEDIUM}, high {s.profile.industryPoints.HIGH}</span>
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <Card title="Fraud pre-checks" description={`Flags at ${policy.fraud.hardStopSeverity} or above force a reject recommendation`} flush>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Rule</th><th>Severity</th><th>Triggers when</th></tr></thead>
+                <tbody>
+                  {Object.entries(policy.fraud.rules).map(([key, rule]) => (
+                    <tr key={key} style={rule.enabled ? undefined : { opacity: 0.5 }}>
+                      <td className="cell-primary">{FRAUD_RULES[key as keyof typeof FRAUD_RULES]}{!rule.enabled && <span className="muted small"> (off)</span>}</td>
+                      <td><Badge tone={severityTone(rule.severity)}>{rule.severity.charAt(0) + rule.severity.slice(1).toLowerCase()}</Badge></td>
+                      <td className="small" style={{ whiteSpace: 'normal', minWidth: 260 }}>{ruleTrigger(key, rule as Record<string, unknown>)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <div className="grid-2">
+            <Card title="LTV limits">
+              {(['LAP', 'MACHINERY', 'INVOICE', 'STOCK', 'FD'] as const).map(k => (
+                <div key={k} className="meter-row">
+                  <div className="meter-head"><span>{COLLATERAL_LABEL[k]}</span><span>{policy.collateral.ltvLimits[k]}%</span></div>
+                  <div className="meter"><span style={{ width: `${policy.collateral.ltvLimits[k]}%` }} /></div>
+                </div>
+              ))}
+            </Card>
+            <Card title="Industry risk" description={`Unlisted industries are treated as ${policy.industries.defaultBand.toLowerCase()} risk`}>
+              <ul className="stack-sm" style={{ gap: 'var(--space-2)' }}>
+                {Object.entries(policy.industries.riskBands).map(([industry, band]) => (
+                  <li key={industry} className="between">
+                    <span>{industry}</span>
+                    <Badge tone={band === 'LOW' ? 'success' : band === 'MEDIUM' ? 'warning' : 'danger'}>{band.charAt(0) + band.slice(1).toLowerCase()}</Badge>
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+            </Card>
           </div>
-        )}
+        </div>
+
+        <aside className="split-rail stack" aria-label="Policy details">
+          <Card title="Version">
+            <dl className="kv" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gap: 'var(--space-4)' }}>
+              <div><dt>Policy</dt><dd className="mono">{policy.id}@{policy.version}</dd></div>
+              <div><dt>Checksum (SHA-256)</dt><dd className="mono small" title={checksum}>{checksum.slice(0, 20)}…</dd></div>
+            </dl>
+            <div className="section-label mt-6">To change the policy</div>
+            <p className="small text-2">Edit a YAML file in <span className="code">policies/</span>, bump its version, then apply it:</p>
+            <div className="secret" style={{ marginTop: 'var(--space-2)' }}>
+              <Terminal size={14} aria-hidden className="muted" />
+              <code>npm run policy -- apply policies/&lt;file&gt;.yaml --nbfc &lt;CODE&gt;</code>
+            </div>
+          </Card>
+
+          <Card title="Maker-checker">
+            <dl className="kv" style={{ gridTemplateColumns: 'minmax(0, 1fr)', gap: 'var(--space-4)' }}>
+              <div><dt>Second approver above</dt><dd>{policy.approvals.checkerRequiredAbove === null ? 'Never on amount alone' : inr(policy.approvals.checkerRequiredAbove)}</dd></div>
+              <div><dt>Overrides need a checker</dt><dd>{policy.approvals.checkerRequiredForOverrides ? 'Yes' : 'No'}</dd></div>
+              <div><dt>Who can check</dt><dd>{policy.approvals.checkerRoles.map(r => r.charAt(0) + r.slice(1).toLowerCase()).join(', ')}, never the maker</dd></div>
+            </dl>
+          </Card>
+
+          <Card title="Bureau overlay" description="Adjusts the score; never a gate on its own">
+            <ul className="stack-sm" style={{ gap: 'var(--space-2)' }}>
+              {policy.bureau.scoreBands.map(b => (
+                <li key={b.minScore} className="between"><span>Score {b.minScore}+</span><span className="num strong">{b.modifier > 0 ? '+' : ''}{b.modifier}</span></li>
+              ))}
+              <li className="between"><span>Below all bands</span><span className="num strong">{policy.bureau.otherwiseModifier}</span></li>
+              <li className="between"><span>DPD 90+ history</span><span className="num strong">{policy.bureau.delinquencyModifier}</span></li>
+              <li className="between"><span>Bureau fraud alert</span><span className="num strong tone-danger">{policy.bureau.fraudAlertModifier}</span></li>
+            </ul>
+          </Card>
+
+          <Card title="History" flush>
+            {history.length === 0 ? (
+              <p className="small muted card-body">No policy applied yet; the built-in default is in use.</p>
+            ) : (
+              <ul>
+                {history.map(h => (
+                  <li key={h.id} className="between" style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="mono small strong" style={{ display: 'block' }}>{h.policyKey}@{h.version}</span>
+                      <span className="cell-sub">{h.activatedAt ? `Activated ${date(h.activatedAt)}` : 'Never activated'} · {h._count.decisions} decisions</span>
+                    </span>
+                    {h.isActive && <Badge tone="success" dot>Active</Badge>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </aside>
       </div>
     </>
   )

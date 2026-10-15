@@ -329,13 +329,12 @@ Policies are changed by applying a new version with `npm run policy -- apply <fi
 |--------|-------|---------|
 | NBFC | 2 | FinFirst Capital, SME Growth Finance |
 | Users | 5 | FinFirst: Admin, 2 Analysts, Viewer; SME Growth: Admin |
-| Borrowers | 8 | Various industries |
-| Loan Applications | 9 | Mix of statuses |
-| Financial Data | 8 | Bank statement analysis for each borrower |
-| Collateral | 5 | Various types (LAP, Machinery, Invoice, Stock) |
-| Credit Decisions | 7 | Scored applications |
-| Approvals | 3 | Sanctioned loans |
-| Audit Logs | 15+ | Event trail |
+| Loan applications | 16 | Spread over the last ~3 months: sanctioned, awaiting checker, in review, referred, rejected (including one PAN/GSTIN fraud hard-stop) and not yet evaluated |
+| Credit decisions | 14 | Produced by the real engine under each NBFC's policy, so scores and reasons are genuine |
+| Sanctioned book | ₹3.3 Cr | FinFirst: 7 loans across 7 industries, within concentration limits; sanctions above ₹25 L carry a recorded checker. SME Growth: 1 loan |
+| Audit logs | 40+ | Consistent with each application's history |
+
+The seed is deterministic: every run produces the same data, with dates relative to today.
 
 ### Demo Credentials
 | Email | Password | Role |
