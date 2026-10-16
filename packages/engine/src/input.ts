@@ -30,7 +30,12 @@ export const ApplicationInputSchema = z.object({
     })
     .nullish(),
   bureau: z
-    .object({ score: z.number(), hasDelinquency: z.boolean().optional(), hasFraudAlert: z.boolean().optional() })
+    .object({
+      score: z.number().nullish(),
+      rank: z.number().int().min(1).nullish(),
+      hasDelinquency: z.boolean().optional(),
+      hasFraudAlert: z.boolean().optional(),
+    })
     .nullish(),
   verifications: z
     .object({

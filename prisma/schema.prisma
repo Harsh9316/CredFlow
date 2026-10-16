@@ -34,6 +34,7 @@ model NBFC {
   webhookEndpoints WebhookEndpoint[]
   webhookEvents    WebhookEvent[]
   idempotencyKeys  IdempotencyKey[]
+  dataConsents     DataConsent[]
 }
 
 // User with role-based access
@@ -85,6 +86,7 @@ model Borrower {
   nbfc             NBFC              @relation(fields: [nbfcId], references: [id])
   loanApplications LoanApplication[]
   financialData    FinancialData[]
+  dataConsents     DataConsent[]
 }
 
 // Loan application (LOS-Lite)
@@ -116,6 +118,7 @@ model LoanApplication {
   creditDecision CreditDecision?
   approval       Approval?
   auditLogs      AuditLog[]
+  dataConsents   DataConsent[]
 }
 
 // ==================== FINANCIAL ANALYSIS ====================
@@ -124,7 +127,10 @@ model LoanApplication {
 model FinancialData {
   id          String   @id @default(cuid())
   borrowerId  String
-  dataType    String // BANK_STATEMENT, ERP_INVOICE, GST_RETURN
+  dataType    String // BANK_STATEMENT, ACCOUNT_AGGREGATOR, GST_RETURNS, ERP_INVOICE
+  // Where the figures came from: MANUAL (typed in), SETU, MOCK, ...
+  source      String   @default("MANUAL")
+  consentId   String?
   periodStart DateTime
   periodEnd   DateTime
 
@@ -144,10 +150,14 @@ model FinancialData {
   // Cash flow analysis
   monthlyData String? // JSON string of monthly breakdown
 
+  // Derived signals from source data (accounts linked, bounces, transfers excluded, GST periods...)
+  metrics Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  borrower Borrower @relation(fields: [borrowerId], references: [id])
+  borrower Borrower     @relation(fields: [borrowerId], references: [id])
+  consent  DataConsent? @relation(fields: [consentId], references: [id])
 }
 
 // ==================== COLLATERAL & SECURITY ====================
@@ -383,4 +393,45 @@ model WebhookDelivery {
 
   @@unique([endpointId, eventId])
   @@index([status, nextAttemptAt])
+}
+
+// ==================== DATA CONSENTS ====================
+
+// A borrower's consent to fetch their data.
+//   ACCOUNT_AGGREGATOR: created through the AA provider; the borrower approves on the AA's screens.
+//     Status: PENDING | ACTIVE | REJECTED | REVOKED | PAUSED | EXPIRED | FAILED | COMPLETED (data ingested)
+//   BUREAU: recorded by a user or API client before a bureau report is pulled. Status: GRANTED | REVOKED
+model DataConsent {
+  id                String    @id @default(cuid())
+  nbfcId            String
+  borrowerId        String
+  applicationId     String?
+  kind              String
+  provider          String // setu | mock | manual
+  providerConsentId String?
+  status            String
+  consentUrl        String?
+  fiTypes           String[]
+  dataFrom          DateTime?
+  dataTo            DateTime?
+  sessionId         String?
+  sessionStatus     String?
+  mobileMasked      String?
+  method            String? // BUREAU: DIGITAL | PHYSICAL
+  reference         String? // BUREAU: the lender's own consent reference (form id, e-sign id)
+  lastError         String?
+  createdById       String?
+  createdByApiKeyId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  completedAt       DateTime?
+
+  nbfc          NBFC             @relation(fields: [nbfcId], references: [id])
+  borrower      Borrower         @relation(fields: [borrowerId], references: [id])
+  application   LoanApplication? @relation(fields: [applicationId], references: [id])
+  financialData FinancialData[]
+
+  @@unique([provider, providerConsentId])
+  @@index([nbfcId, borrowerId])
+  @@index([sessionId])
 }

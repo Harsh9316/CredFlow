@@ -213,3 +213,23 @@ describe('verification-based fraud rules', () => {
     expect(evaluateApplication(healthy, DEFAULT_POLICY).fraud.flags).toEqual([])
   })
 })
+
+describe('bureau rank (CIBIL MSME Rank style)', () => {
+  it('uses rank bands when only a rank is given (1 = lowest risk)', () => {
+    const base = evaluateApplication(healthy, DEFAULT_POLICY).creditScore
+    const good = evaluateApplication({ ...healthy, bureau: { rank: 1 } }, DEFAULT_POLICY)
+    expect(good.bureau.modifier).toBe(5)
+    expect(good.bureau.bureauRank).toBe(1)
+    expect(evaluateApplication({ ...healthy, bureau: { rank: 4 } }, DEFAULT_POLICY).bureau.modifier).toBe(0)
+    expect(evaluateApplication({ ...healthy, bureau: { rank: 7 } }, DEFAULT_POLICY).bureau.modifier).toBe(-3)
+    const poor = evaluateApplication({ ...healthy, bureau: { rank: 9, hasDelinquency: true } }, DEFAULT_POLICY)
+    expect(poor.bureau.modifier).toBe(-17)
+    expect(poor.creditScore).toBe(base - 17)
+    expect(poor.bureau.notes.join(' ')).toMatch(/rank 9 \(above all bands, 1 = lowest risk\)/)
+  })
+
+  it('prefers the score when both are given, and treats neither as no data', () => {
+    expect(evaluateApplication({ ...healthy, bureau: { score: 780, rank: 9 } }, DEFAULT_POLICY).bureau.modifier).toBe(5)
+    expect(evaluateApplication({ ...healthy, bureau: { score: null, rank: null } }, DEFAULT_POLICY).bureau.available).toBe(false)
+  })
+})

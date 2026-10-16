@@ -231,6 +231,37 @@ async function main() {
   const approveViaApi = await api(`/applications/${app1.id}/approve`, key, { method: 'POST' })
   check('there is no API route to sanction', approveViaApi.status === 404 || approveViaApi.status === 405)
 
+  section('Data consents (mock providers)')
+  check('bureau is skipped without a recorded borrower consent', evalBody.connectors?.bureau?.status === 'skipped', evalBody.connectors)
+  check('viewer cannot request bank data', (await req(`/api/applications/${app1.id}/data-consents`, viewer, post({ mobile: '9876543210' }))).status === 403)
+  check('invalid mobile is rejected', (await api(`/applications/${app1.id}/consents`, key, post({ type: 'ACCOUNT_AGGREGATOR', mobile: '12345' }))).status === 400)
+  const aaRes = await api(`/applications/${app1.id}/consents`, key, post({ type: 'ACCOUNT_AGGREGATOR', mobile: '+91 98765 43210', includeGst: true }))
+  const aa = await aaRes.json()
+  check('API creates an Account Aggregator consent with a link for the borrower', aaRes.status === 201 && aa.status === 'PENDING' && typeof aa.consentUrl === 'string' && aa.mobile !== '9876543210', aa)
+  const synced = await (await api(`/consents/${aa.id}/sync`, key, { method: 'POST' })).json()
+  check('sync collects bank and GST data once the borrower approves', synced.dataReceived === true && synced.data?.length === 2, synced)
+  const resynced = await (await api(`/consents/${aa.id}/sync`, key, { method: 'POST' })).json()
+  check('a repeated sync does not ingest twice', resynced.data?.length === 2 && (await prisma.financialData.count({ where: { consentId: aa.id } })) === 2)
+  const aaData = await prisma.financialData.findFirst({ where: { consentId: aa.id, dataType: 'ACCOUNT_AGGREGATOR' } })
+  const metrics = aaData?.metrics as { months?: number; internalTransfersExcluded?: number } | null
+  check('bank data is reduced to monthly figures and signals', (metrics?.months ?? 0) >= 3 && (metrics?.internalTransfersExcluded ?? 0) > 0, metrics)
+  const rejectedRes = await req(`/api/applications/${app1.id}/data-consents`, analyst, post({ mobile: '9876500000' }))
+  const rejected = await rejectedRes.json()
+  const rejectedSync = await (await req(`/api/applications/${app1.id}/data-consents/${rejected.id}/sync`, analyst, { method: 'POST' })).json()
+  check('a consent the borrower rejects is recorded as rejected', rejectedSync.status === 'REJECTED' && rejectedSync.dataReceived === false, rejectedSync)
+  check('another NBFC cannot sync the consent', (await req(`/api/applications/${app1.id}/data-consents/${aa.id}/sync`, sgf, { method: 'POST' })).status === 404)
+  const bureauRes = await api(`/applications/${app1.id}/consents`, key, post({ type: 'BUREAU', method: 'DIGITAL', reference: 'ESIGN-SMOKE-1' }))
+  check('API records a bureau consent', bureauRes.status === 201)
+  const reEval = await (await api(`/applications/${app1.id}/evaluate`, key, { method: 'POST' })).json()
+  check('with consent, underwriting pulls the bureau', ['ok', 'no_record'].includes(reEval.connectors?.bureau?.status), reEval.connectors)
+  check('underwriting uses the Account Aggregator data', reEval.connectors?.bankData?.status === 'ok' && reEval.connectors?.gstReturns?.status === 'ok', reEval.connectors)
+  const setuHook = (token: string) => fetch(`${BASE}/api/connectors/setu/notifications/${token}`, post({ type: 'CONSENT_STATUS_UPDATE', consentId: 'x' }))
+  check('Setu notification with a wrong token is refused', (await setuHook('wrong-token')).status === 404)
+  if (process.env.SETU_AA_WEBHOOK_SECRET) {
+    const ok = await setuHook(process.env.SETU_AA_WEBHOOK_SECRET)
+    check('Setu notification with the secret is accepted (unknown consent ignored)', ok.status === 200 && (await ok.json()).matched === false)
+  }
+
   const stateless = await api('/evaluate', key, post({
     requestedAmount: 2_500_000, requestedTenure: 24,
     borrower: { pan: 'AAGCG1234K', gstin: '27AAGCG1234K1Z5', vintage: 48, industry: 'Manufacturing', annualTurnover: 9_600_000 },

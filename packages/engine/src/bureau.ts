@@ -7,7 +7,9 @@ import type { ApplicationInput, BureauOverlayResult } from './types'
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
 
 export function applyBureauOverlay(bureau: ApplicationInput['bureau'], policy: CreditPolicy): BureauOverlayResult {
-  if (!bureau || bureau.score === undefined || bureau.score === null) {
+  const score = bureau?.score ?? null
+  const rank = bureau?.rank ?? null
+  if (!bureau || (score === null && rank === null)) {
     return {
       available: false,
       delinquencyFlag: false,
@@ -23,7 +25,8 @@ export function applyBureauOverlay(bureau: ApplicationInput['bureau'], policy: C
   if (bureau.hasFraudAlert) {
     return {
       available: true,
-      bureauScore: bureau.score,
+      bureauScore: score ?? undefined,
+      bureauRank: rank ?? undefined,
       delinquencyFlag,
       fraudAlert: true,
       modifier: config.fraudAlertModifier,
@@ -39,14 +42,25 @@ export function applyBureauOverlay(bureau: ApplicationInput['bureau'], policy: C
     notes.push(`Bureau shows DPD 90+ history. Score adjusted by ${signed(config.delinquencyModifier)}.`)
   }
 
-  const band = config.scoreBands.find(b => bureau.score >= b.minScore)
-  const bandModifier = band ? band.modifier : config.otherwiseModifier
-  modifier += bandModifier
-  notes.push(
-    band
-      ? `Bureau score ${bureau.score} (band ${band.minScore}+). Modifier ${signed(bandModifier)}.`
-      : `Bureau score ${bureau.score} (below all bands). Modifier ${signed(bandModifier)}.`
-  )
+  if (score !== null) {
+    const band = config.scoreBands.find(b => score >= b.minScore)
+    const bandModifier = band ? band.modifier : config.otherwiseModifier
+    modifier += bandModifier
+    notes.push(
+      band
+        ? `Bureau score ${score} (band ${band.minScore}+). Modifier ${signed(bandModifier)}.`
+        : `Bureau score ${score} (below all bands). Modifier ${signed(bandModifier)}.`
+    )
+  } else if (rank !== null) {
+    const band = [...config.rankBands].sort((a, b) => a.maxRank - b.maxRank).find(b => rank <= b.maxRank)
+    const bandModifier = band ? band.modifier : config.rankOtherwiseModifier
+    modifier += bandModifier
+    notes.push(
+      band
+        ? `Bureau rank ${rank} (band up to ${band.maxRank}, 1 = lowest risk). Modifier ${signed(bandModifier)}.`
+        : `Bureau rank ${rank} (above all bands, 1 = lowest risk). Modifier ${signed(bandModifier)}.`
+    )
+  }
 
-  return { available: true, bureauScore: bureau.score, delinquencyFlag, fraudAlert: false, modifier, notes }
+  return { available: true, bureauScore: score ?? undefined, bureauRank: rank ?? undefined, delinquencyFlag, fraudAlert: false, modifier, notes }
 }

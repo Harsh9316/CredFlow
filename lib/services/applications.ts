@@ -21,6 +21,7 @@ import { getConnectors } from '@/lib/connectors'
 import { ServiceError, notFound } from './errors'
 import { auditActor, type Actor } from './actor'
 import { recordEvent } from './events'
+import { activeBureauConsent } from './data-consents'
 
 // ───────────────────────── Input schemas ─────────────────────────
 
@@ -72,7 +73,6 @@ export const CreateApplicationSchema = z
         freeCashFlow: z.number().optional().describe('Defaults to inflow minus expenses'),
         inflowVolatility: z.number().min(0).optional().describe('Coefficient of variation; computed from monthlyData if omitted'),
         monthlyData: z.array(MonthlyFlowSchema).max(36).optional(),
-        bankDataConsentHandle: z.string().max(200).optional().describe('Account Aggregator consent handle; monthly flows are fetched through the bank-data connector'),
       })
       .optional(),
     collateral: z
@@ -227,15 +227,8 @@ export async function listApplications(
 
 export async function createApplication(actor: Actor, raw: unknown): Promise<ApplicationResource> {
   const input = CreateApplicationSchema.parse(raw)
-  const { bankData } = getConnectors()
-
-  // External calls happen before the transaction so it stays short
-  let monthlyData: MonthlyFlow[] | undefined = input.financial?.monthlyData
-  if (input.financial?.bankDataConsentHandle) {
-    if (!bankData) throw new ServiceError(422, 'connector_unavailable', 'No bank-data connector is configured (CONNECTOR_BANK_DATA)')
-    monthlyData = await bankData.fetchMonthlyFlows(input.financial.bankDataConsentHandle)
-  }
-
+  // Bank data from an Account Aggregator arrives later, through a consent (see data-consents.ts)
+  const monthlyData: MonthlyFlow[] | undefined = input.financial?.monthlyData
   const fin = input.financial
   const avgInflow = fin?.avgMonthlyInflow ?? (monthlyData?.length ? monthlyData.reduce((a, m) => a + m.inflow, 0) / monthlyData.length : undefined)
   const avgExpenses = fin?.avgMonthlyExpenses ?? (monthlyData?.length ? monthlyData.reduce((a, m) => a + m.outflow, 0) / monthlyData.length : undefined)
@@ -281,7 +274,7 @@ export async function createApplication(actor: Actor, raw: unknown): Promise<App
       await tx.financialData.create({
         data: {
           borrowerId,
-          dataType: input.financial?.bankDataConsentHandle ? 'ACCOUNT_AGGREGATOR' : 'BANK_STATEMENT',
+          dataType: 'BANK_STATEMENT',
           periodStart: new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000),
           periodEnd: new Date(),
           avgMonthlyInflow: avgInflow,
@@ -331,27 +324,37 @@ export async function createApplication(actor: Actor, raw: unknown): Promise<App
 
 // ───────────────────────── Underwrite ─────────────────────────
 
-type ConnectorSummary = Record<string, { provider: string; status: 'ok' | 'no_record' | 'error'; detail?: string }>
+type ConnectorSummary = Record<string, { provider: string; status: 'ok' | 'no_record' | 'skipped' | 'error'; detail?: string }>
 
-async function gatherExternalData(borrower: { pan: string | null; gstin: string | null; legalName: string | null; businessName: string }) {
+type BorrowerForChecks = { id: string; nbfcId: string; pan: string | null; gstin: string | null; legalName: string | null; businessName: string }
+
+async function gatherExternalData(borrower: BorrowerForChecks) {
   const { bureau, gst, kyc } = getConnectors()
   const summary: ConnectorSummary = {}
   const identity = { pan: borrower.pan, gstin: borrower.gstin, legalName: borrower.legalName || borrower.businessName }
 
+  // A bureau report is pulled only with the borrower's recorded consent
+  const bureauConsent = bureau ? await activeBureauConsent(borrower.nbfcId, borrower.id) : null
+  if (bureau && !bureauConsent) {
+    summary.bureau = { provider: bureau.provider, status: 'skipped', detail: 'No borrower consent recorded for a bureau pull' }
+  }
+
   // Connector failures never block underwriting: the engine treats missing data as neutral
   const [bureauResult, gstResult, kycResult] = await Promise.allSettled([
-    bureau ? bureau.fetchReport(identity) : Promise.resolve(undefined),
+    bureau && bureauConsent
+      ? bureau.fetchReport(identity, { reference: bureauConsent.reference ?? bureauConsent.id, capturedAt: bureauConsent.completedAt!.toISOString() })
+      : Promise.resolve(undefined),
     gst && borrower.gstin ? gst.verifyGstin(borrower.gstin) : Promise.resolve(undefined),
     kyc && borrower.pan ? kyc.verifyPan(borrower.pan, identity.legalName) : Promise.resolve(undefined),
   ])
 
   let bureauInput: ApplicationInput['bureau'] = null
-  if (bureau) {
+  if (bureau && bureauConsent) {
     if (bureauResult.status === 'rejected') summary.bureau = { provider: bureau.provider, status: 'error', detail: String(bureauResult.reason) }
     else if (bureauResult.value === null) summary.bureau = { provider: bureau.provider, status: 'no_record' }
     else if (bureauResult.value) {
       const r = bureauResult.value
-      bureauInput = { score: r.score, hasDelinquency: r.hasDelinquency, hasFraudAlert: r.hasFraudAlert }
+      bureauInput = { score: r.score, rank: r.rank, hasDelinquency: r.hasDelinquency, hasFraudAlert: r.hasFraudAlert }
       summary.bureau = { provider: r.provider, status: 'ok', detail: r.reportId }
     }
   }
@@ -378,6 +381,8 @@ async function gatherExternalData(borrower: { pan: string | null; gstin: string 
   return { bureauInput, verifications: Object.keys(verifications).length ? verifications : null, summary }
 }
 
+const BANK_DATA_TYPES = ['BANK_STATEMENT', 'ACCOUNT_AGGREGATOR']
+
 export async function underwriteApplication(actor: Actor, id: string): Promise<{
   application: ApplicationResource
   evaluation: Evaluation
@@ -386,16 +391,35 @@ export async function underwriteApplication(actor: Actor, id: string): Promise<{
 }> {
   const app = await prisma.loanApplication.findFirst({
     where: { id, nbfcId: actor.nbfcId },
-    include: { borrower: { include: { financialData: { orderBy: { periodEnd: 'desc' }, take: 1 } } }, collateral: true },
+    include: { borrower: { include: { financialData: { orderBy: { createdAt: 'desc' }, take: 20 } } }, collateral: true },
   })
   if (!app) throw notFound('Application')
   if (!['APPLIED', 'UNDER_REVIEW'].includes(app.status)) {
     throw new ServiceError(409, 'invalid_state', `Application is ${app.status}; only APPLIED or UNDER_REVIEW applications can be evaluated`)
   }
-  const fd = app.borrower.financialData[0]
-  if (!fd) throw new ServiceError(422, 'missing_financials', 'No financial data found for borrower. Please add financial data first.')
+  // The most recently supplied bank data wins (an Account Aggregator fetch replaces typed-in figures)
+  const fd = app.borrower.financialData.find(f => BANK_DATA_TYPES.includes(f.dataType))
+  if (!fd) throw new ServiceError(422, 'missing_financials', 'No financial data found for borrower. Add bank figures or fetch them through an Account Aggregator consent.')
+  const gstReturns = app.borrower.financialData.find(f => f.dataType === 'GST_RETURNS')
+  const gstTurnover = Number((gstReturns?.metrics as { annualisedTurnover?: unknown } | null)?.annualisedTurnover) || 0
 
   const external = await gatherExternalData(app.borrower)
+  if (fd.dataType === 'ACCOUNT_AGGREGATOR') {
+    const m = (fd.metrics ?? {}) as { months?: number; accounts?: number; bounceCount?: number; internalTransfersExcluded?: number }
+    external.summary.bankData = {
+      provider: fd.source.toLowerCase(),
+      status: 'ok',
+      detail: `${m.months ?? '?'} months from ${m.accounts ?? '?'} account(s) via Account Aggregator; ${m.bounceCount ?? 0} returned payment(s), ${m.internalTransfersExcluded ?? 0} own-account transfer(s) excluded`,
+    }
+  }
+  if (gstTurnover > 0) {
+    // Turnover from filed GST returns is verified; the declared figure is only used without it
+    external.summary.gstReturns = {
+      provider: gstReturns!.source.toLowerCase(),
+      status: 'ok',
+      detail: `Annualised turnover ${Math.round(gstTurnover)} from GSTR-3B (declared: ${app.borrower.annualTurnover ?? 'none'})`,
+    }
+  }
   const input: ApplicationInput = {
     requestedAmount: app.requestedAmount,
     requestedTenure: app.requestedTenure,
@@ -404,7 +428,7 @@ export async function underwriteApplication(actor: Actor, id: string): Promise<{
       gstin: app.borrower.gstin,
       vintage: app.borrower.vintage,
       industry: app.borrower.industry,
-      annualTurnover: app.borrower.annualTurnover,
+      annualTurnover: gstTurnover > 0 ? gstTurnover : app.borrower.annualTurnover,
     },
     financial: {
       avgMonthlyInflow: fd.avgMonthlyInflow || 0,
@@ -452,6 +476,7 @@ export async function underwriteApplication(actor: Actor, id: string): Promise<{
       bureauOverlay: {
         available: result.bureau.available,
         bureauScore: result.bureau.bureauScore,
+        bureauRank: result.bureau.bureauRank,
         modifier: result.bureau.modifier,
         provider: external.summary.bureau?.provider,
       },

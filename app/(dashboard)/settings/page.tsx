@@ -201,6 +201,11 @@ export default async function SettingsPage() {
                 <li key={b.minScore} className="between"><span>Score {b.minScore}+</span><span className="num strong">{b.modifier > 0 ? '+' : ''}{b.modifier}</span></li>
               ))}
               <li className="between"><span>Below all bands</span><span className="num strong">{policy.bureau.otherwiseModifier}</span></li>
+              <li className="section-label" style={{ margin: 'var(--space-3) 0 0' }}>When the bureau returns a rank (1 = lowest risk)</li>
+              {[...policy.bureau.rankBands].sort((a, b) => a.maxRank - b.maxRank).map((b, i, all) => (
+                <li key={b.maxRank} className="between"><span>Rank {(all[i - 1]?.maxRank ?? 0) + 1 === b.maxRank ? b.maxRank : `${(all[i - 1]?.maxRank ?? 0) + 1}–${b.maxRank}`}</span><span className="num strong">{b.modifier > 0 ? '+' : ''}{b.modifier}</span></li>
+              ))}
+              <li className="between"><span>Worse ranks</span><span className="num strong">{policy.bureau.rankOtherwiseModifier}</span></li>
               <li className="between"><span>DPD 90+ history</span><span className="num strong">{policy.bureau.delinquencyModifier}</span></li>
               <li className="between"><span>Bureau fraud alert</span><span className="num strong tone-danger">{policy.bureau.fraudAlertModifier}</span></li>
             </ul>
