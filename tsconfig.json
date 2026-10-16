@@ -20,7 +20,7 @@
     ],
     "paths": {
       "@/*": ["./*"],
-      "@credflow/engine": ["./packages/engine/src/index.ts"]
+      "@credrail/engine": ["./packages/engine/src/index.ts"]
     }
   },
   "include": [

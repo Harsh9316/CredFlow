@@ -1,14 +1,14 @@
 // Credit policy CLI.
 //
 //   npm run policy -- validate policies/*.yaml
-//   npm run policy -- apply policies/credflow-default.yaml --nbfc FFC
+//   npm run policy -- apply policies/credrail-default.yaml --nbfc FFC
 //   npm run policy -- list --nbfc FFC
 //
 // `apply` validates the file, stores it as a new immutable version and makes it active.
 
 import { readFileSync } from 'node:fs'
 import { parse } from 'yaml'
-import { PolicyValidationError, parsePolicy } from '@credflow/engine'
+import { PolicyValidationError, parsePolicy } from '@credrail/engine'
 
 function usage(): never {
   console.error(`Usage:

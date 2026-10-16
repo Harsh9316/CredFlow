@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 export default defineConfig({
   resolve: {
     alias: {
-      '@credflow/engine': fileURLToPath(new URL('./packages/engine/src/index.ts', import.meta.url)),
+      '@credrail/engine': fileURLToPath(new URL('./packages/engine/src/index.ts', import.meta.url)),
       '@': fileURLToPath(new URL('./', import.meta.url)),
     },
   },

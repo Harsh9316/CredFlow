@@ -1,5 +1,5 @@
 // API keys for the public /api/v1 API.
-// Format: cf_<8-char prefix>_<32-char secret>. Only a SHA-256 hash is stored; the prefix
+// Format: cr_<8-char prefix>_<32-char secret>. Only a SHA-256 hash is stored; the prefix
 // is kept in clear so keys can be identified in the UI and logs without revealing them.
 
 import { createHash, randomBytes } from 'node:crypto'
@@ -24,16 +24,16 @@ const hashKey = (key: string) => createHash('sha256').update(key).digest('hex')
 export function generateApiKey(): { key: string; prefix: string; keyHash: string } {
   const prefix = randomBytes(4).toString('hex')
   const secret = randomBytes(24).toString('base64url')
-  const key = `cf_${prefix}_${secret}`
+  const key = `cr_${prefix}_${secret}`
   return { key, prefix, keyHash: hashKey(key) }
 }
 
 /** Resolves the Bearer token on a request to an actor, checking the scope. */
 export async function authenticateApiKey(request: Request, scope: ApiScope): Promise<Actor & { kind: 'api_key' }> {
   const header = request.headers.get('authorization') ?? ''
-  const token = header.match(/^Bearer\s+(cf_[A-Za-z0-9_-]+)$/)?.[1]
+  const token = header.match(/^Bearer\s+(cr_[A-Za-z0-9_-]+)$/)?.[1]
   if (!token) {
-    throw new ServiceError(401, 'unauthorized', 'Send an API key as `Authorization: Bearer cf_...`')
+    throw new ServiceError(401, 'unauthorized', 'Send an API key as `Authorization: Bearer cr_...`')
   }
 
   const key = await prisma.apiKey.findUnique({

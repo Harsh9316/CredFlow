@@ -1,9 +1,9 @@
-// GENERATED from policies/credflow-default.yaml by scripts/generate-default-policy.ts. Do not edit by hand.
+// GENERATED from policies/credrail-default.yaml by scripts/generate-default-policy.ts. Do not edit by hand.
 import type { CreditPolicyInput } from './policy'
 
 export const DEFAULT_POLICY_INPUT: CreditPolicyInput = {
-  "id": "credflow-default",
-  "name": "CredFlow default MSME policy",
+  "id": "credrail-default",
+  "name": "Credrail default MSME policy",
   "version": "1.1.0",
   "description": "General-purpose cash-flow-first scorecard for MSME lending.",
   "decision": {

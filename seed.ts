@@ -1,4 +1,4 @@
-// Demo data for CredFlow. Wipes the database, then creates two NBFCs, their users and
+// Demo data for Credrail. Wipes the database, then creates two NBFCs, their users and
 // policies, and a realistic book of applications.
 //
 // Every application is evaluated by the real engine under its NBFC's policy, so scores,
@@ -17,7 +17,7 @@ import {
   type CollateralType,
   type CreditPolicy,
   type MonthlyFlow,
-} from '@credflow/engine'
+} from '@credrail/engine'
 import prisma from './lib/db'
 import { applyPolicy, getActivePolicy } from './lib/policy'
 
@@ -333,7 +333,7 @@ async function seedApplications(
 }
 
 async function main() {
-  console.log('🌱 Seeding CredFlow database...')
+  console.log('🌱 Seeding Credrail database...')
 
   // Wipe all data. TRUNCATE (not DELETE) because the audit log is append-only.
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
@@ -350,10 +350,10 @@ async function main() {
   })
 
   const [admin, analyst] = await Promise.all([
-    prisma.user.create({ data: { email: 'admin@credflow.io', password: hash('Admin@123'), name: 'Rajesh Kumar', role: 'ADMIN', nbfcId: ffc.id } }),
-    prisma.user.create({ data: { email: 'analyst@credflow.io', password: hash('Analyst@123'), name: 'Priya Sharma', role: 'ANALYST', nbfcId: ffc.id } }),
-    prisma.user.create({ data: { email: 'viewer@credflow.io', password: hash('Viewer@123'), name: 'Amit Patel', role: 'VIEWER', nbfcId: ffc.id } }),
-    prisma.user.create({ data: { email: 'analyst2@credflow.io', password: hash('Analyst@123'), name: 'Sunita Reddy', role: 'ANALYST', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'admin@credrail.dev', password: hash('Admin@123'), name: 'Rajesh Kumar', role: 'ADMIN', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'analyst@credrail.dev', password: hash('Analyst@123'), name: 'Priya Sharma', role: 'ANALYST', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'viewer@credrail.dev', password: hash('Viewer@123'), name: 'Amit Patel', role: 'VIEWER', nbfcId: ffc.id } }),
+    prisma.user.create({ data: { email: 'analyst2@credrail.dev', password: hash('Analyst@123'), name: 'Sunita Reddy', role: 'ANALYST', nbfcId: ffc.id } }),
   ])
   const sgfAdmin = await prisma.user.create({
     data: { email: 'admin@smegrowth.in', password: hash('Admin@123'), name: 'Kavita Menon', role: 'ADMIN', nbfcId: sgf.id },
@@ -361,7 +361,7 @@ async function main() {
   console.log('✅ Created 2 NBFCs and 5 users')
 
   // Credit policies, from the versioned YAML files in policies/
-  await applyPolicy(ffc.id, readPolicy('credflow-default.yaml'))
+  await applyPolicy(ffc.id, readPolicy('credrail-default.yaml'))
   await applyPolicy(sgf.id, readPolicy('unsecured-working-capital.yaml'))
   const ffcPolicy = await getActivePolicy(ffc.id)
   const sgfPolicy = await getActivePolicy(sgf.id)
@@ -374,9 +374,9 @@ async function main() {
 
   console.log('\n🎉 Seeding completed successfully!')
   console.log('\nDemo Credentials:')
-  console.log('  Admin:   admin@credflow.io / Admin@123')
-  console.log('  Analyst: analyst@credflow.io / Analyst@123')
-  console.log('  Viewer:  viewer@credflow.io / Viewer@123')
+  console.log('  Admin:   admin@credrail.dev / Admin@123')
+  console.log('  Analyst: analyst@credrail.dev / Analyst@123')
+  console.log('  Viewer:  viewer@credrail.dev / Viewer@123')
   console.log('  Second NBFC admin: admin@smegrowth.in / Admin@123')
 }
 

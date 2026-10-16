@@ -39,5 +39,5 @@ export type {
 import { DEFAULT_POLICY_INPUT } from './default-policy'
 import { parsePolicy } from './policy'
 
-/** CredFlow's default MSME policy (policies/credflow-default.yaml), validated. */
+/** Credrail's default MSME policy (policies/credrail-default.yaml), validated. */
 export const DEFAULT_POLICY = parsePolicy(DEFAULT_POLICY_INPUT)

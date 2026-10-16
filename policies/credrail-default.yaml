@@ -1,8 +1,8 @@
-# Default CredFlow policy for MSME term loans and working capital.
+# Default Credrail policy for MSME term loans and working capital.
 # Same scorecard as v0.1, but loan sizing uses a proper amortized EMI at the assumed rate.
 # Illustrative starting point only: calibrate against your own portfolio before use.
-id: credflow-default
-name: CredFlow default MSME policy
+id: credrail-default
+name: Credrail default MSME policy
 version: 1.1.0
 description: General-purpose cash-flow-first scorecard for MSME lending.
 

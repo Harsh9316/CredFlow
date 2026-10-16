@@ -1,10 +1,10 @@
-# CredFlow v0.1 behaviour, expressed as a policy.
+# Credrail v0.1 behaviour, expressed as a policy.
 # Kept so decisions made before policies became configurable can be reproduced exactly.
-# Note: affordability uses a flat factor that ignores interest. Prefer credflow-default for new decisions.
+# Note: affordability uses a flat factor that ignores interest. Prefer credrail-default for new decisions.
 id: legacy
-name: CredFlow v0.1 scorecard
+name: Credrail v0.1 scorecard
 version: 0.1.0
-description: Hard-coded scorecard shipped in CredFlow v0.1.
+description: Hard-coded scorecard shipped in Credrail v0.1.
 
 decision:
   approveThreshold: 70

@@ -20,8 +20,8 @@ describe('bundled policy files', () => {
     }
   })
 
-  it('DEFAULT_POLICY is in sync with credflow-default.yaml (run `npm run policy:sync-default`)', () => {
-    expect(DEFAULT_POLICY_INPUT).toEqual(readPolicyYaml('credflow-default.yaml'))
-    expect(DEFAULT_POLICY).toEqual(parsePolicy(readPolicyYaml('credflow-default.yaml')))
+  it('DEFAULT_POLICY is in sync with credrail-default.yaml (run `npm run policy:sync-default`)', () => {
+    expect(DEFAULT_POLICY_INPUT).toEqual(readPolicyYaml('credrail-default.yaml'))
+    expect(DEFAULT_POLICY).toEqual(parsePolicy(readPolicyYaml('credrail-default.yaml')))
   })
 })

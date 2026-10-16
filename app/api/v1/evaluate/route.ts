@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { evaluateApplication, parseApplicationInput } from '@credflow/engine'
+import { evaluateApplication, parseApplicationInput } from '@credrail/engine'
 import { v1, readJson } from '@/lib/api-v1'
 import { getActivePolicy } from '@/lib/policy'
 

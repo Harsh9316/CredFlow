@@ -21,12 +21,12 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: credflow
-          POSTGRES_PASSWORD: credflow
+          POSTGRES_USER: credrail
+          POSTGRES_PASSWORD: credrail
           POSTGRES_DB: shadow
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U credflow"
+          --health-cmd "pg_isready -U credrail"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
@@ -44,10 +44,10 @@ jobs:
       - name: Prisma schema and migrations are in sync
         run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --exit-code --shadow-database-url "$SHADOW_DATABASE_URL"
         env:
-          SHADOW_DATABASE_URL: postgresql://credflow:credflow@localhost:5432/shadow
+          SHADOW_DATABASE_URL: postgresql://credrail:credrail@localhost:5432/shadow
       - name: Validate bundled credit policies
         run: npm run policy -- validate policies/*.yaml
-      - name: Engine default policy is in sync with policies/credflow-default.yaml
+      - name: Engine default policy is in sync with policies/credrail-default.yaml
         run: |
           npm run policy:sync-default
           git diff --exit-code packages/engine/src/default-policy.ts
@@ -64,17 +64,17 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: credflow
-          POSTGRES_PASSWORD: credflow
-          POSTGRES_DB: credflow
+          POSTGRES_USER: credrail
+          POSTGRES_PASSWORD: credrail
+          POSTGRES_DB: credrail
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U credflow"
+          --health-cmd "pg_isready -U credrail"
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
     env:
-      DATABASE_URL: postgresql://credflow:credflow@localhost:5432/credflow
+      DATABASE_URL: postgresql://credrail:credrail@localhost:5432/credrail
       SESSION_SECRET: ci-smoke-test-secret-0123456789abcdef0123
       BASE_URL: http://localhost:3000
       # The smoke test runs a local webhook receiver, and exercises the mock data providers
@@ -118,7 +118,7 @@ jobs:
           for i in $(seq 1 90); do
             status=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/auth/login \
               -H 'content-type: application/json' \
-              -d '{"email":"analyst@credflow.io","password":"Analyst@123"}' || true)
+              -d '{"email":"analyst@credrail.dev","password":"Analyst@123"}' || true)
             [ "$status" = "200" ] && echo "login OK" && exit 0
             sleep 2
           done

@@ -1,4 +1,4 @@
-// End-to-end smoke test against a running, freshly seeded CredFlow instance.
+// End-to-end smoke test against a running, freshly seeded Credrail instance.
 // Covers authentication, tenant isolation, roles, policy-driven decisions, maker-checker,
 // the public API (keys, scopes, idempotency), webhooks and the append-only audit log.
 //
@@ -31,7 +31,7 @@ async function login(email: string, password: string): Promise<string> {
     body: JSON.stringify({ email, password }),
   })
   if (res.status !== 200) throw new Error(`login failed for ${email}: ${res.status}`)
-  const cookie = res.headers.getSetCookie().find(c => c.startsWith('credflow_session='))
+  const cookie = res.headers.getSetCookie().find(c => c.startsWith('credrail_session='))
   if (!cookie) throw new Error(`no session cookie for ${email}`)
   return cookie.split(';')[0]
 }
@@ -82,18 +82,18 @@ async function main() {
   check('unauthenticated API returns 401', (await req('/api/applications', undefined, post({}))).status === 401)
 
   const forged = encodeURIComponent(JSON.stringify({ id: 'x', role: 'ADMIN', nbfcId: ffcApp.nbfcId }))
-  check('unsigned JSON cookie is rejected', (await req(`/api/applications/${ffcApp.id}/decide`, `credflow_session=${forged}`, { method: 'POST' })).status === 401)
-  check('wrong password returns 401', (await req('/api/auth/login', undefined, post({ email: 'analyst@credflow.io', password: 'wrong' }))).status === 401)
+  check('unsigned JSON cookie is rejected', (await req(`/api/applications/${ffcApp.id}/decide`, `credrail_session=${forged}`, { method: 'POST' })).status === 401)
+  check('wrong password returns 401', (await req('/api/auth/login', undefined, post({ email: 'analyst@credrail.dev', password: 'wrong' }))).status === 401)
 
-  const analyst = await login('analyst@credflow.io', 'Analyst@123')
-  const analyst2 = await login('analyst2@credflow.io', 'Analyst@123')
-  const admin = await login('admin@credflow.io', 'Admin@123')
+  const analyst = await login('analyst@credrail.dev', 'Analyst@123')
+  const analyst2 = await login('analyst2@credrail.dev', 'Analyst@123')
+  const admin = await login('admin@credrail.dev', 'Admin@123')
   const sgf = await login('admin@smegrowth.in', 'Admin@123')
-  const viewer = await login('viewer@credflow.io', 'Viewer@123')
+  const viewer = await login('viewer@credrail.dev', 'Viewer@123')
 
   const [h, payload, sig] = viewer.split('=')[1].split('.')
   const claims = JSON.parse(Buffer.from(payload, 'base64url').toString())
-  const tampered = `credflow_session=${h}.${Buffer.from(JSON.stringify({ ...claims, role: 'ADMIN' })).toString('base64url')}.${sig}`
+  const tampered = `credrail_session=${h}.${Buffer.from(JSON.stringify({ ...claims, role: 'ADMIN' })).toString('base64url')}.${sig}`
   check('tampered JWT is rejected', (await req(`/api/applications/${ffcApp.id}/decide`, tampered, { method: 'POST' })).status === 401)
 
   section('Roles and tenant isolation')
@@ -109,9 +109,9 @@ async function main() {
   const ffcRun = await req(`/api/applications/${ffcApp.id}/decide`, analyst, { method: 'POST' })
   const ffcBody = await ffcRun.json()
   check('analyst can run the engine', ffcRun.status === 200, ffcBody)
-  check('FFC decision uses credflow-default', ffcBody.policy?.id === 'credflow-default', ffcBody.policy)
+  check('FFC decision uses credrail-default', ffcBody.policy?.id === 'credrail-default', ffcBody.policy)
   const stored = await prisma.creditDecision.findUnique({ where: { applicationId: ffcApp.id }, include: { policy: true } })
-  check('decision is linked to the policy version', stored?.policy?.policyKey === 'credflow-default' && stored.policy.version === ffcBody.policy?.version)
+  check('decision is linked to the policy version', stored?.policy?.policyKey === 'credrail-default' && stored.policy.version === ffcBody.policy?.version)
 
   const created = await req('/api/applications', sgf, post({
     businessName: 'Smoke Test Traders', contactPerson: 'Test', contactPhone: '9000000000', pan: 'ABCDE1234F',
@@ -125,7 +125,7 @@ async function main() {
   check('SGF decision uses its own policy', sgfRun.policy?.id === 'unsecured-working-capital', sgfRun.policy)
 
   section('Maker-checker')
-  // credflow-default requires a checker (ADMIN) above ₹25L
+  // credrail-default requires a checker (ADMIN) above ₹25L
   const createSmall = await (await req('/api/applications', analyst, post(strongApplication(1_000_000)))).json()
   const small = await (await req(`/api/applications/${createSmall.applicationId}/decide`, analyst, { method: 'POST' })).json()
   check('strong application is recommended for approval', small.decision?.decision === 'APPROVE', small.decision)
@@ -159,10 +159,10 @@ async function main() {
     r.on('end', () => {
       if (r.url === '/fail') { res.writeHead(500).end(); return }
       received.push({
-        type: String(r.headers['credflow-event']),
+        type: String(r.headers['credrail-event']),
         body,
-        signature: String(r.headers['credflow-signature']),
-        delivery: String(r.headers['credflow-delivery']),
+        signature: String(r.headers['credrail-signature']),
+        delivery: String(r.headers['credrail-delivery']),
       })
       res.writeHead(200).end('ok')
     })
@@ -187,12 +187,12 @@ async function main() {
     name: 'Smoke test', scopes: ['applications:read', 'applications:write', 'applications:evaluate', 'evaluate', 'policy:read', 'events:read'],
   }))
   const { key, id: keyId } = await keyRes.json()
-  check('admin creates an API key (shown once)', keyRes.status === 201 && /^cf_/.test(key ?? ''))
+  check('admin creates an API key (shown once)', keyRes.status === 201 && /^cr_/.test(key ?? ''))
   const readOnly = (await (await req('/api/admin/api-keys', admin, post({ name: 'Read only', scopes: ['applications:read'] }))).json()).key
   check('stored key is hashed, not plaintext', !(await prisma.apiKey.findFirst({ where: { keyHash: key } })))
 
   check('missing API key returns 401', (await api('/applications', null)).status === 401)
-  check('unknown API key returns 401', (await api('/applications', 'cf_nope_' + 'x'.repeat(32))).status === 401)
+  check('unknown API key returns 401', (await api('/applications', 'cr_nope_' + 'x'.repeat(32))).status === 401)
   check('session cookie is not accepted by /api/v1', (await req('/api/v1/applications', admin)).status === 401)
 
   const body = {
@@ -241,7 +241,7 @@ async function main() {
   check('stateless evaluate returns the documented example result', statelessBody.evaluation?.creditScore === 75 && statelessBody.evaluation?.finalRecommendedAmt === 1_980_000, statelessBody.evaluation)
   check('stateless evaluate rejects malformed input', (await api('/evaluate', key, post({ requestedAmount: 'lots' }))).status === 400)
   const policy = await (await api('/policy', key)).json()
-  check('API returns the active policy', policy.policy?.id === 'credflow-default' && typeof policy.checksum === 'string')
+  check('API returns the active policy', policy.policy?.id === 'credrail-default' && typeof policy.checksum === 'string')
 
   const events = await (await api('/events?type=application.created&limit=200', key)).json()
   check('events feed includes the created application', events.data?.some((e: { data: { application?: { id: string } } }) => e.data.application?.id === app1.id))
@@ -273,7 +273,7 @@ async function main() {
 
   section('Logout')
   const out = await req('/api/auth/logout', analyst, { method: 'POST' })
-  check('logout clears the cookie', (out.headers.getSetCookie().find(c => c.startsWith('credflow_session=')) ?? '').startsWith('credflow_session=;'))
+  check('logout clears the cookie', (out.headers.getSetCookie().find(c => c.startsWith('credrail_session=')) ?? '').startsWith('credrail_session=;'))
 
   console.log(failures ? `\n${failures} check(s) failed` : '\nAll smoke checks passed')
   await prisma.$disconnect()

@@ -1,6 +1,6 @@
 import Script from 'next/script'
 
-export const metadata = { title: 'CredFlow API Reference' }
+export const metadata = { title: 'Credrail API Reference' }
 
 // Interactive reference rendered by Scalar from /api/v1/openapi.json
 export default function ApiDocsPage() {

@@ -1,12 +1,12 @@
-# CredFlow Underwriting Engine: Functional Flow
+# Credrail Underwriting Engine: Functional Flow
 
-This document explains the logic behind the "System-Assisted Underwriting" in CredFlow. Although often referred to as an "AI Underwriter," the current implementation is a **highly explainable, rule-based scoring engine** that ensures transparency for credit analysts and auditors.
+This document explains the logic behind the "System-Assisted Underwriting" in Credrail. Although often referred to as an "AI Underwriter," the current implementation is a **highly explainable, rule-based scoring engine** that ensures transparency for credit analysts and auditors.
 
 ---
 
 ## 1. The Decision Pipeline
 
-The decision engine (`packages/engine`, published as `@credflow/engine`) follows a 3-stage pipeline before arriving at a recommendation. Every threshold, band and weight below comes from the NBFC's **credit policy**, a versioned YAML file in `policies/`. The numbers in this document are from `policies/credflow-default.yaml`.
+The decision engine (`packages/engine`, published as `@credrail/engine`) follows a 3-stage pipeline before arriving at a recommendation. Every threshold, band and weight below comes from the NBFC's **credit policy**, a versioned YAML file in `policies/`. The numbers in this document are from `policies/credrail-default.yaml`.
 
 ### Stage 1: Fraud & Compliance Pre-Checks
 Before scoring, the system runs automated checks. If any **HIGH_RISK** flags are triggered (e.g., PAN/GSTIN mismatch or severe turnover anomalies), the system forcefully recommends a **REJECT** regardless of the score.
@@ -37,7 +37,7 @@ Decision: **≥70 APPROVE**, **50–69 REFER**, **<50 REJECT**. A different NBFC
 
 ## 3. Concrete Example: SME Loan Analysis
 
-The figures below are the engine's actual output for this input under `credflow-default@1.1.0`. The engine test suite checks them, so this example stays in sync with the code.
+The figures below are the engine's actual output for this input under `credrail-default@1.1.0`. The engine test suite checks them, so this example stays in sync with the code.
 
 ### **The Scenario**
 - **Borrower**: "GreenTech Manufacturing Units"

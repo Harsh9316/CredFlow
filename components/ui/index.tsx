@@ -1,4 +1,4 @@
-// CredFlow UI kit. Server-compatible presentational components; styling lives in app/globals.css.
+// Credrail UI kit. Server-compatible presentational components; styling lives in app/globals.css.
 
 import Link from 'next/link'
 import type { ReactNode } from 'react'

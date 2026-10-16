@@ -2,7 +2,7 @@
 // the handlers validate with, so the spec cannot drift from what the server accepts.
 
 import { z } from 'zod'
-import { ApplicationInputSchema } from '@credflow/engine'
+import { ApplicationInputSchema } from '@credrail/engine'
 import { CreateApplicationSchema } from './services/applications'
 import { API_SCOPES } from './api-keys'
 import { EVENT_TYPES } from './services/events'
@@ -26,18 +26,18 @@ export function buildOpenApiDocument(serverUrl: string) {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'CredFlow API',
+      title: 'Credrail API',
       version: '1.0.0',
       description: [
         'Submit loan applications, run explainable underwriting under your credit policy, and receive results by webhook.',
         '',
-        '**Authentication:** create an API key on the Developers page and send it as `Authorization: Bearer cf_...`. Each endpoint lists the scope it needs.',
+        '**Authentication:** create an API key on the Developers page and send it as `Authorization: Bearer cr_...`. Each endpoint lists the scope it needs.',
         '',
         '**Idempotency:** send an `Idempotency-Key` header on `POST /applications` to retry safely. A retry with the same key and body returns the original response.',
         '',
         '**Sanctioning:** the API can create and evaluate applications, but approvals are made by a signed-in analyst in the dashboard (with maker-checker where your policy requires it).',
         '',
-        `**Webhooks:** events are POSTed to your endpoints with a \`CredFlow-Signature: t=<unix>,v1=<hex>\` header, where v1 is the HMAC-SHA256 of \`<t>.<raw body>\` using the endpoint's signing secret. Event types: ${EVENT_TYPES.filter(t => t !== 'webhook.test').map(t => `\`${t}\``).join(', ')}.`,
+        `**Webhooks:** events are POSTed to your endpoints with a \`Credrail-Signature: t=<unix>,v1=<hex>\` header, where v1 is the HMAC-SHA256 of \`<t>.<raw body>\` using the endpoint's signing secret. Event types: ${EVENT_TYPES.filter(t => t !== 'webhook.test').map(t => `\`${t}\``).join(', ')}.`,
       ].join('\n'),
       license: { name: 'Apache-2.0', identifier: 'Apache-2.0' },
     },

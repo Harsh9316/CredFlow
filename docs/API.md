@@ -1,16 +1,16 @@
-# CredFlow API
+# Credrail API
 
-Connect your loan origination system, ERP or marketplace to CredFlow. The interactive reference is served by every CredFlow instance at **`/docs/api`**, and the OpenAPI 3.1 document at **`/api/v1/openapi.json`**.
+Connect your loan origination system, ERP or marketplace to Credrail. The interactive reference is served by every Credrail instance at **`/docs/api`**, and the OpenAPI 3.1 document at **`/api/v1/openapi.json`**.
 
 ## Authentication
 
 1. Sign in as an NBFC admin and open **Developers**.
-2. Create an API key with the scopes you need. The key (`cf_<prefix>_<secret>`) is shown once, and CredFlow stores only a hash.
+2. Create an API key with the scopes you need. The key (`cr_<prefix>_<secret>`) is shown once, and Credrail stores only a hash.
 3. Send it on every request:
 
 ```bash
-curl https://credflow.example.com/api/v1/applications \
-  -H "Authorization: Bearer cf_1a2b3c4d_..."
+curl https://credrail.example.com/api/v1/applications \
+  -H "Authorization: Bearer cr_1a2b3c4d_..."
 ```
 
 | Scope | Allows |
@@ -29,8 +29,8 @@ Every key belongs to one NBFC and only sees that NBFC's data. Actions taken with
 ## Create an application
 
 ```bash
-curl -X POST https://credflow.example.com/api/v1/applications \
-  -H "Authorization: Bearer $CREDFLOW_KEY" \
+curl -X POST https://credrail.example.com/api/v1/applications \
+  -H "Authorization: Bearer $CREDRAIL_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: erp-order-8812" \
   -d '{
@@ -60,20 +60,20 @@ curl -X POST https://credflow.example.com/api/v1/applications \
 ```
 
 - Pass `borrowerId` instead of `borrower` to reuse a borrower your NBFC already has.
-- Financials can come from `monthlyData` (CredFlow derives averages and volatility), from explicit averages, or from an Account Aggregator consent via `financial.bankDataConsentHandle` when a bank-data connector is configured.
+- Financials can come from `monthlyData` (Credrail derives averages and volatility), from explicit averages, or from an Account Aggregator consent via `financial.bankDataConsentHandle` when a bank-data connector is configured.
 
 ## Run underwriting
 
 ```bash
-curl -X POST https://credflow.example.com/api/v1/applications/$ID/evaluate \
-  -H "Authorization: Bearer $CREDFLOW_KEY"
+curl -X POST https://credrail.example.com/api/v1/applications/$ID/evaluate \
+  -H "Authorization: Bearer $CREDRAIL_KEY"
 ```
 
 The response includes the full evaluation: decision, score breakdown, recommended amount, reasons, risk flags, fraud checks and bureau overlay. It also includes the policy version (`id`, `version`, `checksum`) the evaluation ran under and which data connectors were used.
 
 ### Stateless evaluation
 
-`POST /evaluate` runs the engine on the posted data under your active policy and returns the result **without storing anything**. Use it to pre-screen leads, or to run CredFlow's decisioning inside your own system of record.
+`POST /evaluate` runs the engine on the posted data under your active policy and returns the result **without storing anything**. Use it to pre-screen leads, or to run Credrail's decisioning inside your own system of record.
 
 ## Idempotency
 
@@ -125,9 +125,9 @@ and these headers:
 
 | Header | Value |
 |---|---|
-| `CredFlow-Event` | Event type |
-| `CredFlow-Delivery` | Delivery id. It stays the same across retries, so use it to de-duplicate. |
-| `CredFlow-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">` |
+| `Credrail-Event` | Event type |
+| `Credrail-Delivery` | Delivery id. It stays the same across retries, so use it to de-duplicate. |
+| `Credrail-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">` |
 
 **Verify every delivery** before trusting it:
 

@@ -6,9 +6,9 @@ import { ArrowRight, CheckCircle2, FileCheck2, GitBranch, ShieldCheck } from 'lu
 import { Alert } from '@/components/ui'
 
 const DEMO_ACCOUNTS = [
-  { label: 'Admin · checker', email: 'admin@credflow.io', password: 'Admin@123' },
-  { label: 'Credit analyst', email: 'analyst@credflow.io', password: 'Analyst@123' },
-  { label: 'Viewer', email: 'viewer@credflow.io', password: 'Viewer@123' },
+  { label: 'Admin · checker', email: 'admin@credrail.dev', password: 'Admin@123' },
+  { label: 'Credit analyst', email: 'analyst@credrail.dev', password: 'Analyst@123' },
+  { label: 'Viewer', email: 'viewer@credrail.dev', password: 'Viewer@123' },
   { label: 'Second NBFC admin', email: 'admin@smegrowth.in', password: 'Admin@123' },
 ]
 
@@ -52,7 +52,7 @@ export default function LoginPage() {
               <path d="M15 8h5v5" />
             </svg>
           </span>
-          <span className="brand-name" style={{ color: '#fff' }}>CredFlow</span>
+          <span className="brand-name" style={{ color: '#fff' }}>Credrail</span>
         </div>
 
         <div>

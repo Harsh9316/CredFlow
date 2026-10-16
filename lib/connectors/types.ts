@@ -2,7 +2,7 @@
 // bureau, GST, PAN or Account Aggregator provider, then register it in lib/connectors/index.ts.
 // Connectors fetch data; all credit judgement stays in the engine and the policy.
 
-import type { MonthlyFlow } from '@credflow/engine'
+import type { MonthlyFlow } from '@credrail/engine'
 
 export type BusinessIdentity = {
   pan?: string | null

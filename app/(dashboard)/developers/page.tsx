@@ -42,7 +42,7 @@ export default async function DevelopersPage() {
     <>
       <PageHeader
         title="Developers"
-        description={`Connect ${session.nbfcName}'s loan origination system, ERP or marketplace to CredFlow.`}
+        description={`Connect ${session.nbfcName}'s loan origination system, ERP or marketplace to Credrail.`}
         actions={<a href="/docs/api" target="_blank" rel="noreferrer" className="btn btn-secondary">API reference</a>}
       />
       <DeveloperSettings

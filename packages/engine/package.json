@@ -1,5 +1,5 @@
 {
-  "name": "@credflow/engine",
+  "name": "@credrail/engine",
   "version": "0.1.0",
   "description": "Explainable, policy-driven credit decisioning for SME lending: fraud pre-checks, bureau overlay, cash-flow scoring and loan sizing.",
   "license": "Apache-2.0",
@@ -31,7 +31,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Harsh9316/CredFlow.git",
+    "url": "git+https://github.com/Harsh9316/credrail.git",
     "directory": "packages/engine"
   },
   "scripts": {

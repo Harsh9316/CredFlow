@@ -76,7 +76,7 @@ export default function DeveloperSettings({ scopes, eventTypes, keys, endpoints,
       {notice && <Alert tone="success">{notice}</Alert>}
       {secret && (
         <Alert tone="warning" title={`${secret.label}: copy it now`}>
-          It won&apos;t be shown again. CredFlow stores only what it needs to verify it.
+          It won&apos;t be shown again. Credrail stores only what it needs to verify it.
           <div className="secret">
             <code>{secret.value}</code>
             <CopyButton value={secret.value} />
@@ -88,7 +88,7 @@ export default function DeveloperSettings({ scopes, eventTypes, keys, endpoints,
       {/* API keys */}
       <Card
         title="API keys"
-        description="Authenticate requests to /api/v1 with Authorization: Bearer cf_…"
+        description="Authenticate requests to /api/v1 with Authorization: Bearer cr_…"
         actions={!showKeyForm && <button className="btn btn-secondary btn-sm" onClick={() => setShowKeyForm(true)}><Plus aria-hidden /> Create key</button>}
         flush
       >
@@ -140,7 +140,7 @@ export default function DeveloperSettings({ scopes, eventTypes, keys, endpoints,
                 {keys.map(k => (
                   <tr key={k.id} style={k.revokedAt ? { opacity: 0.55 } : undefined}>
                     <td className="cell-primary">{k.name}</td>
-                    <td className="mono small">cf_{k.prefix}_••••</td>
+                    <td className="mono small">cr_{k.prefix}_••••</td>
                     <td className="small" style={{ whiteSpace: 'normal', maxWidth: 320 }}>{k.scopes.join(', ')}</td>
                     <td className="muted small">{when(k.lastUsedAt)}</td>
                     <td className="right">
@@ -187,7 +187,7 @@ export default function DeveloperSettings({ scopes, eventTypes, keys, endpoints,
           >
             <div className="field" style={{ maxWidth: 560 }}>
               <label className="label" htmlFor="hook-url">Endpoint URL</label>
-              <input id="hook-url" className="input" type="url" value={hookUrl} onChange={e => setHookUrl(e.target.value)} placeholder="https://example.com/credflow-webhook" required autoFocus />
+              <input id="hook-url" className="input" type="url" value={hookUrl} onChange={e => setHookUrl(e.target.value)} placeholder="https://example.com/credrail-webhook" required autoFocus />
               <span className="hint">Must be https and publicly reachable.</span>
             </div>
             <fieldset style={{ border: 0, padding: 0, margin: 'var(--space-5) 0 0' }}>

@@ -5,7 +5,7 @@
 //   GSTIN ending in 'C'          -> GSTIN cancelled          PAN ending in 'D' -> DPD 90+ history
 
 import { createHash } from 'node:crypto'
-import type { MonthlyFlow } from '@credflow/engine'
+import type { MonthlyFlow } from '@credrail/engine'
 import type { BankDataConnector, BureauConnector, GstConnector, KycConnector } from './types'
 
 const unit = (seed: string) => parseInt(createHash('sha256').update(seed).digest('hex').slice(0, 8), 16) / 0xffffffff

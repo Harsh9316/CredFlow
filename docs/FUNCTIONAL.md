@@ -1,10 +1,10 @@
-# CredFlow — Functional Specification
+# Credrail — Functional Specification
 
 ## 1. Overview
 
-**CredFlow** is a B2B SaaS platform for NBFC credit underwriting and SME lending decisioning. It provides system-assisted underwriting with analyst control — standardizing analysis, improving speed, and strengthening auditability.
+**Credrail** is a B2B SaaS platform for NBFC credit underwriting and SME lending decisioning. It provides system-assisted underwriting with analyst control — standardizing analysis, improving speed, and strengthening auditability.
 
-> *CredFlow does not replace NBFC credit policy. It standardizes analysis, improves speed, and strengthens auditability.*
+> *Credrail does not replace NBFC credit policy. It standardizes analysis, improves speed, and strengthens auditability.*
 
 ### Key Capabilities
 - System-assisted underwriting with full analyst control at every step
@@ -339,8 +339,8 @@ The seed is deterministic: every run produces the same data, with dates relative
 ### Demo Credentials
 | Email | Password | Role |
 |-------|----------|------|
-| `admin@credflow.io` | `Admin@123` | NBFC Admin |
-| `analyst@credflow.io` | `Analyst@123` | Credit Analyst |
-| `analyst2@credflow.io` | `Analyst@123` | Credit Analyst |
-| `viewer@credflow.io` | `Viewer@123` | Viewer |
+| `admin@credrail.dev` | `Admin@123` | NBFC Admin |
+| `analyst@credrail.dev` | `Analyst@123` | Credit Analyst |
+| `analyst2@credrail.dev` | `Analyst@123` | Credit Analyst |
+| `viewer@credrail.dev` | `Viewer@123` | Viewer |
 | `admin@smegrowth.in` | `Admin@123` | NBFC Admin (SME Growth Finance) |

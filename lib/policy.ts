@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import prisma from './db'
-import { DEFAULT_POLICY, parsePolicy, type CreditPolicy } from '@credflow/engine'
+import { DEFAULT_POLICY, parsePolicy, type CreditPolicy } from '@credrail/engine'
 
 export type ActivePolicy = {
   policy: CreditPolicy
