@@ -29,8 +29,8 @@ Credrail takes an SME loan application through fraud pre-checks, an optional bur
 ### With Docker (about a minute)
 
 ```bash
-git clone https://github.com/Harsh9316/credrail.git
-cd Credrail
+git clone https://github.com/Harsh9316/CredFlow.git
+cd CredFlow
 docker compose up --build
 ```
 
