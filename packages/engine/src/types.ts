@@ -30,7 +30,10 @@ export type ApplicationInput = {
     hasPersonalGuarantee: boolean
   } | null
   bureau?: {
-    score: number
+    /** Score where higher is better (e.g. a 300-900 bureau score). */
+    score?: number | null
+    /** Commercial rank where 1 is the lowest risk (e.g. CIBIL MSME Rank, 1-10). Used when no score is given. */
+    rank?: number | null
     hasDelinquency?: boolean
     hasFraudAlert?: boolean
   } | null
@@ -62,6 +65,7 @@ export type FraudCheckResult = {
 export type BureauOverlayResult = {
   available: boolean
   bureauScore?: number
+  bureauRank?: number
   delinquencyFlag: boolean
   fraudAlert: boolean
   modifier: number

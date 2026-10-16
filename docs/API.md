@@ -60,7 +60,29 @@ curl -X POST https://credrail.example.com/api/v1/applications \
 ```
 
 - Pass `borrowerId` instead of `borrower` to reuse a borrower your NBFC already has.
-- Financials can come from `monthlyData` (Credrail derives averages and volatility), from explicit averages, or from an Account Aggregator consent via `financial.bankDataConsentHandle` when a bank-data connector is configured.
+- Financials can come from `monthlyData` (Credrail derives averages and volatility) or from explicit averages. To use bank statements fetched through an Account Aggregator instead, request a consent after creating the application (next section).
+
+## Bank data, GST returns and bureau consent
+
+Fetch the borrower's bank statements (and, optionally, GST returns) through an Account Aggregator:
+
+```bash
+curl -X POST https://credrail.example.com/api/v1/applications/$ID/consents \
+  -H "Authorization: Bearer $CREDRAIL_KEY" -H "Content-Type: application/json" \
+  -d '{ "type": "ACCOUNT_AGGREGATOR", "mobile": "9876543210", "includeGst": true, "months": 12 }'
+```
+
+The response has a `consentUrl`. Send it to the borrower, who approves the request in their Account Aggregator app. Credrail then fetches the data, either when the provider notifies it or when you call `POST /consents/{id}/sync`. The data is reduced to monthly inflows and outflows, inflow volatility, returned-payment count and GST turnover. Raw transactions are not stored. You receive a `financial_data.received` event, and the next evaluation uses this data. Turnover from GST returns replaces the declared turnover.
+
+A bureau report is pulled only after you record that the borrower consented:
+
+```bash
+curl -X POST https://credrail.example.com/api/v1/applications/$ID/consents \
+  -H "Authorization: Bearer $CREDRAIL_KEY" -H "Content-Type: application/json" \
+  -d '{ "type": "BUREAU", "method": "DIGITAL", "reference": "esign-7781" }'
+```
+
+Without a bureau consent, the evaluation's `connectors.bureau.status` is `skipped`.
 
 ## Run underwriting
 

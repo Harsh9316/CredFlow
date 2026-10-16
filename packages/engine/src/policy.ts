@@ -150,6 +150,16 @@ export const CreditPolicySchema = z
       // First band whose minScore the bureau score meets applies.
       scoreBands: z.array(z.object({ minScore: z.number(), modifier: z.number() })),
       otherwiseModifier: z.number(),
+      // For commercial ranks where 1 is the lowest risk (CIBIL MSME Rank, 1-10): the first band
+      // whose maxRank the rank is at or under applies.
+      rankBands: z
+        .array(z.object({ maxRank: z.number().int().min(1), modifier: z.number() }))
+        .default([
+          { maxRank: 2, modifier: 5 },
+          { maxRank: 5, modifier: 0 },
+          { maxRank: 7, modifier: -3 },
+        ]),
+      rankOtherwiseModifier: z.number().default(-7),
     }),
   })
   .superRefine((p, ctx) => {

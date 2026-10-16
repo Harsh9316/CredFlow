@@ -1,10 +1,12 @@
 import { notFound } from 'next/navigation'
 import {
   AlertTriangle, ArrowRight, CheckCircle2, CircleDot, Cpu, FilePlus2, Info, KeyRound, RotateCcw,
-  ShieldAlert, ShieldCheck, Undo2, UserCheck, XCircle,
+  Landmark, ShieldAlert, ShieldCheck, Undo2, UserCheck, XCircle,
 } from 'lucide-react'
 import prisma from '@/lib/db'
 import DecisionPanel from '@/components/DecisionPanel'
+import DataConsentsPanel, { type ConsentView } from '@/components/DataConsentsPanel'
+import { connectorSettings } from '@/lib/connectors'
 import { getSession, requirePageSession } from '@/lib/auth'
 import { getActivePolicy } from '@/lib/policy'
 import { canActAsChecker, parsePolicy, type CreditPolicy } from '@credrail/engine'
@@ -41,6 +43,11 @@ const AUDIT: Record<string, { label: string; icon: typeof CircleDot; tone?: 'suc
   APPLICATION_REJECTED: { label: 'Rejected', icon: XCircle, tone: 'danger' },
   REJECTION_OVERRIDE: { label: 'Rejected (override)', icon: XCircle, tone: 'danger' },
   REFERRED_FOR_REVIEW: { label: 'Referred for review', icon: RotateCcw, tone: 'warning' },
+  DATA_CONSENT_REQUESTED: { label: 'Bank data consent requested', icon: Landmark },
+  DATA_CONSENT_UPDATED: { label: 'Bank data consent updated', icon: Landmark },
+  DATA_SESSION_STARTED: { label: 'Bank data fetch started', icon: Landmark },
+  FINANCIAL_DATA_RECEIVED: { label: 'Bank data received', icon: Landmark, tone: 'success' },
+  BUREAU_CONSENT_RECORDED: { label: 'Bureau consent recorded', icon: ShieldCheck },
 }
 
 function auditDetail(action: string, d: Record<string, unknown>): string | null {
@@ -83,10 +90,35 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
   })
   if (!application) notFound()
 
+  // Same choice as underwriting: the most recently supplied bank data
   const financialData = await prisma.financialData.findFirst({
-    where: { borrowerId: application.borrowerId },
-    orderBy: { periodEnd: 'desc' },
+    where: { borrowerId: application.borrowerId, dataType: { in: ['BANK_STATEMENT', 'ACCOUNT_AGGREGATOR'] } },
+    orderBy: { createdAt: 'desc' },
   })
+  const consentRows = await prisma.dataConsent.findMany({
+    where: { applicationId: id, nbfcId: session.nbfcId },
+    include: { financialData: { select: { dataType: true, metrics: true } } },
+    orderBy: { createdAt: 'desc' },
+  })
+  const consents: ConsentView[] = consentRows.map(c => ({
+    id: c.id,
+    kind: c.kind,
+    provider: c.provider,
+    status: c.status,
+    consentUrl: c.status === 'PENDING' ? c.consentUrl : null,
+    fiTypes: c.fiTypes,
+    mobile: c.mobileMasked,
+    sessionStatus: c.sessionStatus,
+    method: c.method,
+    reference: c.reference,
+    error: c.lastError,
+    dataReceived: c.kind === 'ACCOUNT_AGGREGATOR' && !!c.completedAt,
+    bank: (c.financialData.find(f => f.dataType === 'ACCOUNT_AGGREGATOR')?.metrics ?? null) as ConsentView['bank'],
+    gst: (c.financialData.find(f => f.dataType === 'GST_RETURNS')?.metrics ?? null) as ConsentView['gst'],
+    createdAt: c.createdAt.toISOString(),
+    completedAt: c.completedAt?.toISOString() ?? null,
+  }))
+  const providers = connectorSettings()
 
   const { borrower, collateral, creditDecision: decision, approval, auditLogs } = application
   const policy = await decisionPolicy(decision?.policyId, session.nbfcId)
@@ -114,7 +146,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
   const recommendations = parse<string[]>(decision?.recommendations, [])
   const inputs = parse<Record<string, unknown> | null>(decision?.calculationInputs, null)
   const fraud = inputs?.fraudPreCheck as { riskLevel: string; summary: string; flagCount: number } | undefined
-  const bureau = inputs?.bureauOverlay as { available: boolean; bureauScore?: number; modifier: number; provider?: string } | undefined
+  const bureau = inputs?.bureauOverlay as { available: boolean; bureauScore?: number; bureauRank?: number; modifier: number; provider?: string } | undefined
   const connectors = (inputs?.connectors ?? {}) as Connectors
   const emi = typeof inputs?.emi === 'number' ? inputs.emi : null
   const coverage = typeof inputs?.emiCoverageRatio === 'number' ? inputs.emiCoverageRatio : null
@@ -285,8 +317,8 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
                   <dt>Bureau</dt>
                   <dd>
                     {bureau?.available
-                      ? <>{bureau.bureauScore} <span className="muted small">({bureau.modifier > 0 ? '+' : ''}{bureau.modifier} to score)</span></>
-                      : <span className="muted">{connectors.bureau?.status === 'no_record' ? 'No bureau record' : connectors.bureau?.status === 'error' ? 'Unavailable' : 'Not checked'}</span>}
+                      ? <>{bureau.bureauScore ?? (bureau.bureauRank ? `Rank ${bureau.bureauRank}` : '—')} <span className="muted small">({bureau.modifier > 0 ? '+' : ''}{bureau.modifier} to score)</span></>
+                      : <span className="muted">{connectors.bureau?.status === 'no_record' ? 'No bureau record' : connectors.bureau?.status === 'skipped' ? 'No consent' : connectors.bureau?.status === 'error' ? 'Unavailable' : 'Not checked'}</span>}
                   </dd>
                 </div>
                 <div>
@@ -299,7 +331,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
                 </div>
               </div>
               {Object.values(connectors).some(c => c.provider === 'mock') && (
-                <Alert tone="info" className="mt-4">Bureau, GST and PAN results come from <strong>mock</strong> providers (test data).</Alert>
+                <Alert tone="info" className="mt-4">Some results come from <strong>mock</strong> providers (test data).</Alert>
               )}
             </Card>
           )}
@@ -308,7 +340,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
           {financialData && (
             <Card
               title="Cash flow"
-              description={financialData.dataType === 'ACCOUNT_AGGREGATOR' ? 'From Account Aggregator data' : 'From bank statement analysis'}
+              description={financialData.dataType === 'ACCOUNT_AGGREGATOR' ? `From Account Aggregator data (${financialData.source.toLowerCase()})` : 'From figures entered with the application'}
             >
               <div className="tiles">
                 <div className="tile"><div className="tile-label">Avg. monthly inflow</div><div className="figure num">{inr(financialData.avgMonthlyInflow)}</div></div>
@@ -420,6 +452,16 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
               interestRate: approval.interestRate ?? 0,
               overrideReason: approval.overrideSystem ? approval.overrideReason : null,
             } : null}
+          />
+
+          <DataConsentsPanel
+            applicationId={id}
+            canAct={session.role !== 'VIEWER' && ['APPLIED', 'UNDER_REVIEW'].includes(application.status)}
+            bankProvider={providers.bankData}
+            bureauProvider={providers.bureau}
+            defaultMobile={borrower.contactPhone}
+            hasGstin={!!borrower.gstin}
+            consents={consents}
           />
 
           {approval && approval.finalDecision === 'APPROVE' && (

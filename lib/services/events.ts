@@ -11,6 +11,8 @@ export const EVENT_TYPES = [
   'application.rejected',
   'application.referred',
   'application.returned',
+  'consent.updated',
+  'financial_data.received',
   'webhook.test',
 ] as const
 

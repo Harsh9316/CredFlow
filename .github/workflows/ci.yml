@@ -83,6 +83,8 @@ jobs:
       CONNECTOR_GST: mock
       CONNECTOR_KYC: mock
       CONNECTOR_BANK_DATA: mock
+      ALLOW_MOCK_CONNECTORS: "true"
+      SETU_AA_WEBHOOK_SECRET: ci-setu-webhook-secret-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

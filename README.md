@@ -21,7 +21,7 @@ Credrail takes an SME loan application through fraud pre-checks, an optional bur
 - **Use just the engine.** [`@credrail/engine`](packages/engine) is a pure TypeScript package with no database or framework, so you can drop it into an existing loan system.
 - **API-first.** A REST API with an OpenAPI 3.1 spec, scoped API keys, idempotent writes, signed webhooks and an event feed, so you can plug Credrail into your LOS, ERP or marketplace. See [docs/API.md](docs/API.md).
 - **Maker-checker.** Your policy decides which sanctions need a second approver (by amount, or whenever the system is overridden), and the checker must be a different user.
-- **Pluggable data.** Interfaces for bureau, GST, PAN and Account Aggregator providers, with mock implementations for development. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Real data, with consent.** Account Aggregator bank statements and GST returns, plus GSTIN and PAN verification, through Setu. A bureau adapter works with any commercial bureau (CIBIL, CRIF, Experian, Equifax) through your own gateway. Bureau pulls require a recorded borrower consent, and only derived figures are stored. Mocks are included for development. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
 - **Auditable.** Overrides need a reason, and every action (by a user or an API key) goes into an audit log that Postgres refuses to edit or delete.
 
 ## Quick start
@@ -135,7 +135,8 @@ Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signe
 ## Roadmap
 
 - RBI Key Fact Statement / APR and DPDP consent records
-- Real connectors: Account Aggregator (Sahamati FIUs), GST and commercial bureaus
+- More Account Aggregator FIU gateways (Finvu, OneMoney) and ready-made CIBIL / CRIF gateways
+- Bank-statement signals (bounces, EMI obligations) as policy rules
 - Policy editing and side-by-side backtesting in the UI
 - Publish `@credrail/engine` to npm
 - API rate limiting and a TypeScript SDK

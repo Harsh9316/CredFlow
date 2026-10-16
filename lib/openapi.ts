@@ -6,6 +6,7 @@ import { ApplicationInputSchema } from '@credrail/engine'
 import { CreateApplicationSchema } from './services/applications'
 import { API_SCOPES } from './api-keys'
 import { EVENT_TYPES } from './services/events'
+import { BureauConsentSchema, RequestBankDataSchema } from './services/data-consents'
 
 const toSchema = (schema: z.ZodType) => z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' })
 
@@ -45,6 +46,7 @@ export function buildOpenApiDocument(serverUrl: string) {
     security: [{ apiKey: [] }],
     tags: [
       { name: 'Applications' },
+      { name: 'Data consents' },
       { name: 'Decisioning' },
       { name: 'Policy' },
       { name: 'Events' },
@@ -91,7 +93,7 @@ export function buildOpenApiDocument(serverUrl: string) {
           tags: ['Decisioning'],
           operationId: 'evaluateStoredApplication',
           summary: 'Run underwriting on a stored application',
-          description: 'Scope: `applications:evaluate`. Runs fraud pre-checks, bureau overlay (if a bureau connector is configured) and the scorecard under your active policy, stores the recommendation and emits `application.evaluated`. Re-running replaces the previous recommendation.',
+          description: 'Scope: `applications:evaluate`. Uses the latest bank data (an Account Aggregator fetch replaces figures sent at creation) and GST-verified turnover when available. Runs fraud pre-checks, the bureau overlay (only with a bureau connector and a recorded borrower consent) and the scorecard under your active policy, stores the recommendation and emits `application.evaluated`. Re-running replaces the previous recommendation.',
           parameters: [{ name: 'id', in: 'path', required: true, schema: str }],
           responses: {
             200: { description: 'OK', content: json({ type: 'object', properties: { application: ref('Application'), evaluation: ref('Evaluation'), policy: ref('PolicyRef'), connectors: { type: 'object' } } }) },
@@ -100,6 +102,66 @@ export function buildOpenApiDocument(serverUrl: string) {
             409: { description: 'Application is not in a state that can be evaluated', content: json(ref('Error')) },
             422: { description: 'No financial data for the borrower', content: json(ref('Error')) },
           },
+        },
+      },
+      '/applications/{id}/consents': {
+        post: {
+          tags: ['Data consents'],
+          operationId: 'createConsent',
+          summary: 'Request bank/GST data or record a bureau consent',
+          description: [
+            'Scope: `applications:write`. Emits `consent.updated`.',
+            '',
+            '`type: ACCOUNT_AGGREGATOR` creates an Account Aggregator consent request. Send the returned `consentUrl` to the borrower; once they approve it, call `/consents/{id}/sync` (or wait for the provider notification) and the bank statements, and GST returns if requested, are fetched, reduced to monthly figures and used at the next evaluation. Emits `financial_data.received`.',
+            '',
+            '`type: BUREAU` records that the borrower consented to a bureau pull. Underwriting pulls a bureau report only when such a consent, under 180 days old, exists.',
+          ].join('\n'),
+          parameters: [{ name: 'id', in: 'path', required: true, schema: str }, { name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', maxLength: 255 } }],
+          requestBody: {
+            required: true,
+            content: json({
+              oneOf: [
+                { allOf: [{ type: 'object', required: ['type'], properties: { type: { const: 'ACCOUNT_AGGREGATOR' } } }, toSchema(RequestBankDataSchema)] },
+                { allOf: [{ type: 'object', required: ['type'], properties: { type: { const: 'BUREAU' } } }, toSchema(BureauConsentSchema)] },
+              ],
+            }),
+          },
+          responses: {
+            201: { description: 'Created', content: json(ref('Consent')) },
+            ...errorResponses,
+            404: { description: 'Application not found', content: json(ref('Error')) },
+            409: { description: 'Application already decided', content: json(ref('Error')) },
+            422: { description: 'No Account Aggregator connector configured', content: json(ref('Error')) },
+            502: { description: 'The provider returned an error', content: json(ref('Error')) },
+          },
+        },
+        get: {
+          tags: ['Data consents'],
+          operationId: 'listConsents',
+          summary: "List an application's consents",
+          description: 'Scope: `applications:read`.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: str }],
+          responses: { 200: { description: 'OK', content: json({ type: 'object', properties: { data: { type: 'array', items: ref('Consent') } } }) }, ...errorResponses },
+        },
+      },
+      '/consents/{id}': {
+        get: {
+          tags: ['Data consents'],
+          operationId: 'getConsent',
+          summary: 'Get a consent',
+          description: 'Scope: `applications:read`. Returns the stored state; use `/sync` to refresh it from the provider.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: str }],
+          responses: { 200: { description: 'OK', content: json(ref('Consent')) }, ...errorResponses, 404: { description: 'Not found', content: json(ref('Error')) } },
+        },
+      },
+      '/consents/{id}/sync': {
+        post: {
+          tags: ['Data consents'],
+          operationId: 'syncConsent',
+          summary: 'Refresh a consent from its provider',
+          description: 'Scope: `applications:write`. Re-reads the consent; when it is approved, starts the data fetch and stores the results once ready. Safe to call repeatedly: data is stored once.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: str }],
+          responses: { 200: { description: 'OK', content: json(ref('Consent')) }, ...errorResponses, 404: { description: 'Not found', content: json(ref('Error')) }, 502: { description: 'The provider returned an error', content: json(ref('Error')) } },
         },
       },
       '/evaluate': {
@@ -152,6 +214,29 @@ export function buildOpenApiDocument(serverUrl: string) {
           required: ['error'],
           properties: { error: { type: 'object', required: ['code', 'message'], properties: { code: str, message: str, details: {} } } },
         },
+        Consent: {
+          type: 'object',
+          properties: {
+            id: str,
+            applicationId: nullable(str),
+            kind: { type: 'string', enum: ['ACCOUNT_AGGREGATOR', 'BUREAU'] },
+            provider: str,
+            status: { type: 'string', enum: ['CREATING', 'PENDING', 'ACTIVE', 'REJECTED', 'REVOKED', 'PAUSED', 'EXPIRED', 'FAILED'] },
+            consentUrl: { ...nullable(str), description: 'Link for the borrower to approve; present while PENDING' },
+            fiTypes: strings,
+            dataRange: nullable({ type: 'object', properties: { from: str, to: str } }),
+            mobile: { ...nullable(str), description: 'Masked' },
+            sessionStatus: nullable({ type: 'string', enum: ['PENDING', 'PARTIAL', 'COMPLETED', 'EXPIRED', 'FAILED'] }),
+            method: nullable({ type: 'string', enum: ['DIGITAL', 'PHYSICAL'] }),
+            reference: nullable(str),
+            error: nullable(str),
+            dataReceived: { type: 'boolean' },
+            data: { type: 'array', items: { type: 'object', properties: { type: { type: 'string', enum: ['ACCOUNT_AGGREGATOR', 'GST_RETURNS'] }, avgMonthlyInflow: nullable(num), avgMonthlyOutflow: nullable(num), metrics: { type: 'object' } } } },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+            completedAt: nullable({ type: 'string', format: 'date-time' }),
+          },
+        },
         PolicyRef: { type: 'object', properties: { id: str, version: str, checksum: str } },
         Event: { type: 'object', properties: { id: str, type: str, createdAt: { type: 'string', format: 'date-time' }, data: { type: 'object' } } },
         ScoreBreakdown: {
@@ -182,7 +267,7 @@ export function buildOpenApiDocument(serverUrl: string) {
                 flags: { type: 'array', items: { type: 'object', properties: { code: str, severity: str, description: str, recommendation: str } } },
               },
             },
-            bureau: { type: 'object', properties: { available: { type: 'boolean' }, bureauScore: num, modifier: num, notes: strings } },
+            bureau: { type: 'object', properties: { available: { type: 'boolean' }, bureauScore: num, bureauRank: { type: 'integer', minimum: 1, description: '1 = lowest risk' }, modifier: num, notes: strings } },
             policy: { type: 'object', properties: { id: str, version: str } },
           },
         },

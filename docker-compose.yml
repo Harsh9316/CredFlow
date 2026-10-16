@@ -36,6 +36,8 @@ services:
       CONNECTOR_GST: mock
       CONNECTOR_KYC: mock
       CONNECTOR_BANK_DATA: mock
+      # The image runs with NODE_ENV=production, which refuses mock providers unless allowed
+      ALLOW_MOCK_CONNECTORS: "true"
     volumes:
       - credrail-data:/data
 
