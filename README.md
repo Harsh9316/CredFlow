@@ -1,6 +1,11 @@
-# Credrail
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/credrail-logo-dark.svg">
+    <img alt="Credrail" src="public/brand/credrail-logo.svg" height="56">
+  </picture>
+</h1>
 
-**Open-source, explainable credit underwriting for Indian NBFCs.**
+<p align="center"><strong>Open-source, explainable credit underwriting for Indian NBFCs.</strong></p>
 
 Credrail takes an SME loan application through fraud pre-checks, an optional bureau overlay and a cash-flow-first credit score, then recommends approve / refer / reject with the reasons behind it. Analysts make the final call, and every step is written to an audit trail.
 
@@ -122,6 +127,7 @@ Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signe
 
 - [API guide](docs/API.md), plus the interactive reference at `/docs/api` on any running instance
 - [Data connectors](docs/CONNECTORS.md)
+- [Brand guidelines and logo files](docs/BRAND.md)
 - [Functional specification](docs/FUNCTIONAL.md)
 - [Technical documentation](docs/TECHNICAL.md)
 - [Underwriting engine explained](docs/UNDERWRITING_EXPLAINED.md)

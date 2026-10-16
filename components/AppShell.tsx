@@ -8,6 +8,7 @@ import {
   Monitor, Moon, Plus, SlidersHorizontal, Sun, X,
 } from 'lucide-react'
 import { ROLE_LABEL, initials } from '@/lib/format'
+import { LogoIcon } from '@/components/Logo'
 
 type User = { name: string; email: string; role: string; nbfcName: string }
 type Theme = 'system' | 'light' | 'dark'
@@ -29,17 +30,6 @@ const NAV = [
     ],
   },
 ]
-
-function LogoMark() {
-  return (
-    <span className="brand-mark" aria-hidden>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 17l5-5 4 4 7-8" />
-        <path d="M15 8h5v5" />
-      </svg>
-    </span>
-  )
-}
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement
@@ -101,9 +91,9 @@ export default function AppShell({ user, awaitingChecker, children }: { user: Us
     <div className="shell" data-nav-open={navOpen}>
       <aside className="sidebar" aria-label="Main navigation">
         <div className="sidebar-brand">
-          <LogoMark />
+          <LogoIcon size={32} />
           <div style={{ minWidth: 0 }}>
-            <div className="brand-name">Credrail</div>
+            <div className="brand-name">credrail</div>
             <div className="brand-org" title={user.nbfcName}>{user.nbfcName}</div>
           </div>
         </div>
@@ -186,8 +176,8 @@ export default function AppShell({ user, awaitingChecker, children }: { user: Us
           <button className="icon-btn" onClick={() => setNavOpen(o => !o)} aria-label={navOpen ? 'Close menu' : 'Open menu'}>
             {navOpen ? <X aria-hidden /> : <Menu aria-hidden />}
           </button>
-          <LogoMark />
-          <span className="brand-name">Credrail</span>
+          <LogoIcon size={32} />
+          <span className="brand-name">credrail</span>
         </div>
         <main className="content">{children}</main>
       </div>
