@@ -4,7 +4,7 @@ Credrail handles borrower financial and identity data, so security reports are t
 
 ## Reporting a vulnerability
 
-Please **do not open a public issue**. Report it privately through [GitHub Security Advisories](https://github.com/Harsh9316/credrail/security/advisories/new).
+Please **do not open a public issue**. Report it privately through [GitHub Security Advisories](https://github.com/Harsh9316/CredFlow/security/advisories/new).
 
 Include the affected version or commit, steps to reproduce, and the impact you expect. We aim to acknowledge reports within 3 working days.
 
