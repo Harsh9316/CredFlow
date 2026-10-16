@@ -1,8 +1,8 @@
-# CredFlow — Technical Documentation
+# Credrail — Technical Documentation
 
 ## Positioning Statement
 
-> *CredFlow does not replace NBFC credit policy. It standardizes analysis, improves speed, and strengthens auditability — with full analyst control at every step.*
+> *Credrail does not replace NBFC credit policy. It standardizes analysis, improves speed, and strengthens auditability — with full analyst control at every step.*
 
 ### Out of Scope (v1)
 
@@ -31,7 +31,7 @@
 ## 2. Project Structure
 
 ```
-credflow/
+credrail/
 ├── app/
 │   ├── layout.tsx                    # Root layout + global CSS
 │   ├── page.tsx                      # Login page
@@ -73,14 +73,14 @@ credflow/
 │   ├── webhooks.ts                   # Signing, SSRF checks, delivery with retries
 │   └── openapi.ts                    # OpenAPI 3.1 document
 ├── packages/
-│   └── engine/                       # @credflow/engine: pure decision engine (no DB, no Next.js)
+│   └── engine/                       # @credrail/engine: pure decision engine (no DB, no Next.js)
 │       ├── src/                      # policy schema, fraud checks, bureau, scoring, evaluate
 │       └── test/                     # unit, schema, policy and legacy-parity tests
 ├── policies/                         # Versioned credit policies (YAML)
 ├── scripts/
 │   ├── policy.ts                     # Policy CLI: validate / apply / list
 │   ├── smoke-test.ts                 # End-to-end checks against a running instance
-│   └── generate-default-policy.ts    # Syncs the engine default from credflow-default.yaml
+│   └── generate-default-policy.ts    # Syncs the engine default from credrail-default.yaml
 ├── proxy.ts                          # Rejects unauthenticated requests
 ├── prisma/
 │   └── schema.prisma                 # Database schema
@@ -199,9 +199,9 @@ The policy's `approvals` section decides when a second approver is needed (`chec
 
 > System-assisted underwriting with analyst control. The engine does not make decisions — it produces recommendations that analysts evaluate.
 
-Lives in `packages/engine` as the standalone package `@credflow/engine`. It is pure and deterministic: `evaluateApplication(input, policy)` takes plain data and returns the full evaluation, with no database or framework dependencies. The app imports it through a TypeScript path alias, and external users can install the built package.
+Lives in `packages/engine` as the standalone package `@credrail/engine`. It is pure and deterministic: `evaluateApplication(input, policy)` takes plain data and returns the full evaluation, with no database or framework dependencies. The app imports it through a TypeScript path alias, and external users can install the built package.
 
-Every number below comes from the **credit policy**. The tables show the values in `policies/credflow-default.yaml`. See [section 9](#9-credit-policies) for how policies work.
+Every number below comes from the **credit policy**. The tables show the values in `policies/credrail-default.yaml`. See [section 9](#9-credit-policies) for how policies work.
 
 ### 3-Stage Pipeline
 
@@ -302,7 +302,7 @@ Every number below comes from the **credit policy**. The tables show the values 
 ### Flow
 1. User submits credentials via login form
 2. Server validates against `User` table (bcrypt-hashed passwords, constant-time on unknown emails)
-3. On success, sets `credflow_session` cookie: an HS256-signed JWT (`httpOnly`, `secure` in production, 8h expiry) signed with `SESSION_SECRET`
+3. On success, sets `credrail_session` cookie: an HS256-signed JWT (`httpOnly`, `secure` in production, 8h expiry) signed with `SESSION_SECRET`
 4. `proxy.ts` rejects requests to dashboard pages and `/api/applications/*` without a valid signature
 5. Pages and route handlers call `getSession()` / `requirePageSession()` / `requireApiSession()` from `lib/auth.ts`, which re-check the user is still active
 
@@ -386,10 +386,10 @@ npm run dev
 ### Default Login Credentials
 | Email | Password | Role |
 |-------|----------|------|
-| `admin@credflow.io` | `Admin@123` | ADMIN |
-| `analyst@credflow.io` | `Analyst@123` | ANALYST |
-| `analyst2@credflow.io` | `Analyst@123` | ANALYST |
-| `viewer@credflow.io` | `Viewer@123` | VIEWER |
+| `admin@credrail.dev` | `Admin@123` | ADMIN |
+| `analyst@credrail.dev` | `Analyst@123` | ANALYST |
+| `analyst2@credrail.dev` | `Analyst@123` | ANALYST |
+| `viewer@credrail.dev` | `Viewer@123` | VIEWER |
 | `admin@smegrowth.in` | `Admin@123` | ADMIN (second NBFC) |
 
 ---
@@ -413,11 +413,11 @@ Bundled policies:
 
 | File | Use |
 |---|---|
-| `credflow-default.yaml` | General MSME lending; the engine's built-in default |
+| `credrail-default.yaml` | General MSME lending; the engine's built-in default |
 | `unsecured-working-capital.yaml` | Stricter, stability-weighted unsecured lines |
 | `secured-lap.yaml` | Collateral-led LAP scorecard |
 | `invoice-discounting.yaml` | Short-tenure receivables finance |
-| `legacy-v0.1.yaml` | Reproduces CredFlow v0.1 exactly (flat-factor EMI) |
+| `legacy-v0.1.yaml` | Reproduces Credrail v0.1 exactly (flat-factor EMI) |
 
 The sample policies are illustrative starting points, not credit advice. Calibrate them against your own portfolio.
 

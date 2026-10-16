@@ -1,6 +1,6 @@
-# @credflow/engine
+# @credrail/engine
 
-Explainable, policy-driven credit decisioning for SME lending. This is the engine behind [CredFlow](https://github.com/Harsh9316/CredFlow), packaged so you can use it inside your own loan origination system.
+Explainable, policy-driven credit decisioning for SME lending. This is the engine behind [Credrail](https://github.com/Harsh9316/credrail), packaged so you can use it inside your own loan origination system.
 
 - **Pure and deterministic.** It has no database, no framework and no network calls, and the same input and policy always give the same output.
 - **Policy as data.** Thresholds, scorecard bands, LTV limits, industry risk, fraud rules and bureau modifiers all live in one validated policy document.
@@ -9,13 +9,13 @@ Explainable, policy-driven credit decisioning for SME lending. This is the engin
 ## Install
 
 ```bash
-npm install @credflow/engine
+npm install @credrail/engine
 ```
 
 ## Use
 
 ```ts
-import { evaluateApplication, DEFAULT_POLICY } from '@credflow/engine'
+import { evaluateApplication, DEFAULT_POLICY } from '@credrail/engine'
 
 const result = evaluateApplication(
   {
@@ -51,7 +51,7 @@ Write a policy as YAML or JSON, then validate it with `parsePolicy`:
 ```ts
 import { readFileSync } from 'node:fs'
 import { parse } from 'yaml'
-import { parsePolicy, PolicyValidationError } from '@credflow/engine'
+import { parsePolicy, PolicyValidationError } from '@credrail/engine'
 
 try {
   const policy = parsePolicy(parse(readFileSync('my-policy.yaml', 'utf8')))
@@ -60,7 +60,7 @@ try {
 }
 ```
 
-Example policies are in the [`policies/`](https://github.com/Harsh9316/CredFlow/tree/main/policies) folder of the CredFlow repo. They are illustrative starting points, not credit advice, so calibrate them against your own portfolio.
+Example policies are in the [`policies/`](https://github.com/Harsh9316/credrail/tree/main/policies) folder of the Credrail repo. They are illustrative starting points, not credit advice, so calibrate them against your own portfolio.
 
 ## License
 

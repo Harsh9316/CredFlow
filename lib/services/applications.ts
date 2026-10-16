@@ -15,7 +15,7 @@ import {
   type CreditPolicy,
   type Evaluation,
   type MonthlyFlow,
-} from '@credflow/engine'
+} from '@credrail/engine'
 import { getActivePolicy } from '@/lib/policy'
 import { getConnectors } from '@/lib/connectors'
 import { ServiceError, notFound } from './errors'

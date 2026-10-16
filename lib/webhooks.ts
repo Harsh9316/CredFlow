@@ -5,9 +5,9 @@
 // (via `after()`), and from `npm run webhooks:dispatch` on a schedule as a safety net.
 //
 // Each request carries:
-//   CredFlow-Event:      application.sanctioned
-//   CredFlow-Delivery:   <delivery id>   (stable across retries; use it to de-duplicate)
-//   CredFlow-Signature:  t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the endpoint secret>
+//   Credrail-Event:      application.sanctioned
+//   Credrail-Delivery:   <delivery id>   (stable across retries; use it to de-duplicate)
+//   Credrail-Signature:  t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the endpoint secret>
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
@@ -112,10 +112,10 @@ async function deliver(deliveryId: string): Promise<void> {
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: {
           'content-type': 'application/json',
-          'user-agent': 'CredFlow-Webhooks/1.0',
-          'credflow-event': delivery.event.type,
-          'credflow-delivery': delivery.id,
-          'credflow-signature': signPayload(delivery.endpoint.secret, body),
+          'user-agent': 'Credrail-Webhooks/1.0',
+          'credrail-event': delivery.event.type,
+          'credrail-delivery': delivery.id,
+          'credrail-signature': signPayload(delivery.endpoint.secret, body),
         },
         body,
       })

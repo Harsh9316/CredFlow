@@ -60,7 +60,7 @@ export const CreditPolicySchema = z
     affordability: z.object({
       // `amortized`: EMI = standard reducing-balance instalment at annualInterestRate.
       // `flat-factor`: EMI = amount / tenure and eligibility = maxEMI * tenure * flatFactor
-      //  (CredFlow v0.1 behaviour, kept so old decisions can be reproduced).
+      //  (Credrail v0.1 behaviour, kept so old decisions can be reproduced).
       method: z.enum(['amortized', 'flat-factor']),
       annualInterestRate: z.number().min(0).max(100),
       flatFactor: z.number().positive().default(0.85),

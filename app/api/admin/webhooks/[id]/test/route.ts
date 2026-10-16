@@ -13,7 +13,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   const delivery = await prisma.$transaction(async tx => {
     const event = await tx.webhookEvent.create({
-      data: { nbfcId: session.nbfcId, type: 'webhook.test', data: { message: 'Test event from CredFlow', endpointId: id } },
+      data: { nbfcId: session.nbfcId, type: 'webhook.test', data: { message: 'Test event from Credrail', endpointId: id } },
     })
     return tx.webhookDelivery.create({ data: { endpointId: id, eventId: event.id } })
   })

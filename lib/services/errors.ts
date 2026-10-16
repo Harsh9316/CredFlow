@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ZodError } from 'zod'
-import { PolicyValidationError } from '@credflow/engine'
+import { PolicyValidationError } from '@credrail/engine'
 
 // A failure the caller can act on. Route handlers turn it into a JSON error response.
 export class ServiceError extends Error {

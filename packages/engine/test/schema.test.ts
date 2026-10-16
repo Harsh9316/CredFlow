@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { PolicyValidationError, parsePolicy } from '../src'
 import { readPolicyYaml } from './helpers'
 
-const base = () => structuredClone(readPolicyYaml('credflow-default.yaml')) as any
+const base = () => structuredClone(readPolicyYaml('credrail-default.yaml')) as any
 
 function issuesFor(mutate: (p: any) => void): string[] {
   const p = base()

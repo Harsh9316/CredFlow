@@ -3,7 +3,7 @@
 
 import { SignJWT, jwtVerify } from 'jose'
 
-export const SESSION_COOKIE_NAME = 'credflow_session'
+export const SESSION_COOKIE_NAME = 'credrail_session'
 export const SESSION_MAX_AGE = 60 * 60 * 8 // 8 hours
 
 export type Role = 'ADMIN' | 'ANALYST' | 'VIEWER'

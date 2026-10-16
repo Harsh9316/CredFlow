@@ -46,8 +46,8 @@ function applyTheme(theme: Theme) {
   if (theme === 'system') delete root.dataset.theme
   else root.dataset.theme = theme
   try {
-    if (theme === 'system') localStorage.removeItem('credflow-theme')
-    else localStorage.setItem('credflow-theme', theme)
+    if (theme === 'system') localStorage.removeItem('credrail-theme')
+    else localStorage.setItem('credrail-theme', theme)
   } catch {}
 }
 
@@ -103,7 +103,7 @@ export default function AppShell({ user, awaitingChecker, children }: { user: Us
         <div className="sidebar-brand">
           <LogoMark />
           <div style={{ minWidth: 0 }}>
-            <div className="brand-name">CredFlow</div>
+            <div className="brand-name">Credrail</div>
             <div className="brand-org" title={user.nbfcName}>{user.nbfcName}</div>
           </div>
         </div>
@@ -187,7 +187,7 @@ export default function AppShell({ user, awaitingChecker, children }: { user: Us
             {navOpen ? <X aria-hidden /> : <Menu aria-hidden />}
           </button>
           <LogoMark />
-          <span className="brand-name">CredFlow</span>
+          <span className="brand-name">Credrail</span>
         </div>
         <main className="content">{children}</main>
       </div>

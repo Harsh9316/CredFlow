@@ -2,7 +2,7 @@ import { Terminal } from 'lucide-react'
 import prisma from '@/lib/db'
 import { requirePageSession } from '@/lib/auth'
 import { getActivePolicy } from '@/lib/policy'
-import type { CreditPolicy } from '@credflow/engine'
+import type { CreditPolicy } from '@credrail/engine'
 import { Badge, Card, PageHeader } from '@/components/ui'
 import { COLLATERAL_LABEL, date, inr } from '@/lib/format'
 

@@ -299,7 +299,7 @@ model CreditPolicy {
 // ==================== PUBLIC API ====================
 
 // API key for the public /api/v1 API. Only a SHA-256 hash of the secret is stored;
-// the full key is shown once at creation. Format: cf_<prefix>_<secret>
+// the full key is shown once at creation. Format: cr_<prefix>_<secret>
 model ApiKey {
   id          String    @id @default(cuid())
   nbfcId      String

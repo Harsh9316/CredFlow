@@ -1,11 +1,11 @@
-// Regenerates packages/engine/src/default-policy.ts from policies/credflow-default.yaml,
+// Regenerates packages/engine/src/default-policy.ts from policies/credrail-default.yaml,
 // so the engine ships a default without depending on a YAML parser.
 // Run: npm run policy:sync-default   (CI fails if the two drift apart)
 import { readFileSync, writeFileSync } from 'node:fs'
 import { parse } from 'yaml'
 import { parsePolicy } from '../packages/engine/src/policy'
 
-const source = 'policies/credflow-default.yaml'
+const source = 'policies/credrail-default.yaml'
 const raw = parse(readFileSync(source, 'utf8'))
 parsePolicy(raw) // fail loudly if the file is invalid
 

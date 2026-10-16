@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'sw
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono-face', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: { default: 'CredFlow', template: '%s · CredFlow' },
+  title: { default: 'Credrail', template: '%s · Credrail' },
   description: 'Explainable, policy-driven credit underwriting for NBFCs',
 }
 
@@ -18,7 +18,7 @@ export const viewport: Viewport = {
 }
 
 // Applies a saved theme choice before first paint, so there is no flash of the wrong theme
-const themeScript = `try{var t=localStorage.getItem('credflow-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}`
+const themeScript = `try{var t=localStorage.getItem('credrail-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}`
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

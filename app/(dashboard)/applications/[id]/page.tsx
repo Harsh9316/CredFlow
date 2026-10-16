@@ -7,7 +7,7 @@ import prisma from '@/lib/db'
 import DecisionPanel from '@/components/DecisionPanel'
 import { getSession, requirePageSession } from '@/lib/auth'
 import { getActivePolicy } from '@/lib/policy'
-import { canActAsChecker, parsePolicy, type CreditPolicy } from '@credflow/engine'
+import { canActAsChecker, parsePolicy, type CreditPolicy } from '@credrail/engine'
 import { Alert, Badge, Card, DecisionBadge, EmptyState, Meter, PageHeader, ScoreRing, StatusBadge } from '@/components/ui'
 import { COLLATERAL_LABEL, DECISION, date, dateTime, inr, scoreTone, vintage } from '@/lib/format'
 

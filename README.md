@@ -1,20 +1,20 @@
-# CredFlow
+# Credrail
 
 **Open-source, explainable credit underwriting for Indian NBFCs.**
 
-CredFlow takes an SME loan application through fraud pre-checks, an optional bureau overlay and a cash-flow-first credit score, then recommends approve / refer / reject with the reasons behind it. Analysts make the final call, and every step is written to an audit trail.
+Credrail takes an SME loan application through fraud pre-checks, an optional bureau overlay and a cash-flow-first credit score, then recommends approve / refer / reject with the reasons behind it. Analysts make the final call, and every step is written to an audit trail.
 
-> CredFlow does not replace your credit policy, it runs it. Each NBFC's policy is a versioned YAML file covering thresholds, scorecard bands, LTV limits, industry risk, fraud rules and bureau modifiers, and every decision records the exact version it used.
+> Credrail does not replace your credit policy, it runs it. Each NBFC's policy is a versioned YAML file covering thresholds, scorecard bands, LTV limits, industry risk, fraud rules and bureau modifiers, and every decision records the exact version it used.
 
-## Why CredFlow
+## Why Credrail
 
 - **Explainable by default.** Every decision includes a 100-point score breakdown, approval reasons, risk flags and recommendations, so you never get a bare number.
 - **Fraud is handled separately from credit risk.** Critical fraud signals such as a PAN/GSTIN mismatch or turnover that doesn't match bank flows force a reject recommendation before scoring. Credit risk is scored and priced.
 - **Cash flow first.** Bureau data adjusts the score but never gates it on its own, so thin-file MSMEs still get assessed.
 - **Multi-tenant.** Multiple NBFCs share one deployment, and each sees only its own borrowers, applications and policy.
 - **Policy as code.** Credit policy lives in validated, versioned YAML. Versions are immutable, and every decision links to the exact one it ran under.
-- **Use just the engine.** [`@credflow/engine`](packages/engine) is a pure TypeScript package with no database or framework, so you can drop it into an existing loan system.
-- **API-first.** A REST API with an OpenAPI 3.1 spec, scoped API keys, idempotent writes, signed webhooks and an event feed, so you can plug CredFlow into your LOS, ERP or marketplace. See [docs/API.md](docs/API.md).
+- **Use just the engine.** [`@credrail/engine`](packages/engine) is a pure TypeScript package with no database or framework, so you can drop it into an existing loan system.
+- **API-first.** A REST API with an OpenAPI 3.1 spec, scoped API keys, idempotent writes, signed webhooks and an event feed, so you can plug Credrail into your LOS, ERP or marketplace. See [docs/API.md](docs/API.md).
 - **Maker-checker.** Your policy decides which sanctions need a second approver (by amount, or whenever the system is overridden), and the checker must be a different user.
 - **Pluggable data.** Interfaces for bureau, GST, PAN and Account Aggregator providers, with mock implementations for development. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
 - **Auditable.** Overrides need a reason, and every action (by a user or an API key) goes into an audit log that Postgres refuses to edit or delete.
@@ -24,8 +24,8 @@ CredFlow takes an SME loan application through fraud pre-checks, an optional bur
 ### With Docker (about a minute)
 
 ```bash
-git clone https://github.com/Harsh9316/CredFlow.git
-cd CredFlow
+git clone https://github.com/Harsh9316/credrail.git
+cd Credrail
 docker compose up --build
 ```
 
@@ -47,10 +47,10 @@ npm run dev
 
 | Email | Password | Role | NBFC |
 |---|---|---|---|
-| admin@credflow.io | Admin@123 | Admin (checker) | FinFirst Capital |
-| analyst@credflow.io | Analyst@123 | Analyst | FinFirst Capital |
-| analyst2@credflow.io | Analyst@123 | Analyst | FinFirst Capital |
-| viewer@credflow.io | Viewer@123 | Viewer | FinFirst Capital |
+| admin@credrail.dev | Admin@123 | Admin (checker) | FinFirst Capital |
+| analyst@credrail.dev | Analyst@123 | Analyst | FinFirst Capital |
+| analyst2@credrail.dev | Analyst@123 | Analyst | FinFirst Capital |
+| viewer@credrail.dev | Viewer@123 | Viewer | FinFirst Capital |
 | admin@smegrowth.in | Admin@123 | Admin | SME Growth Finance |
 
 To check tenant isolation, log in as the two admins: each sees only their own NBFC's applications and policy. Demo logins appear on the sign-in page only when `NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS=true`.
@@ -73,11 +73,11 @@ Policies live in [`policies/`](policies):
 
 | Policy | For |
 |---|---|
-| [`credflow-default`](policies/credflow-default.yaml) | General MSME lending (the built-in default) |
+| [`credrail-default`](policies/credrail-default.yaml) | General MSME lending (the built-in default) |
 | [`unsecured-working-capital`](policies/unsecured-working-capital.yaml) | Unsecured lines; stricter, stability-weighted |
 | [`secured-lap`](policies/secured-lap.yaml) | Loan against property; collateral-led |
 | [`invoice-discounting`](policies/invoice-discounting.yaml) | Short-tenure receivables finance |
-| [`legacy-v0.1`](policies/legacy-v0.1.yaml) | Reproduces CredFlow v0.1 exactly |
+| [`legacy-v0.1`](policies/legacy-v0.1.yaml) | Reproduces Credrail v0.1 exactly |
 
 The sample policies are illustrative starting points, not credit advice. Calibrate them against your own portfolio.
 
@@ -92,7 +92,7 @@ To change a policy, copy a file, edit it, bump `version` and apply it. The Setti
 ## Using the engine on its own
 
 ```ts
-import { evaluateApplication, DEFAULT_POLICY } from '@credflow/engine'
+import { evaluateApplication, DEFAULT_POLICY } from '@credrail/engine'
 
 const result = evaluateApplication(application, DEFAULT_POLICY)
 // result.decision, result.creditScore, result.finalRecommendedAmt,
@@ -131,7 +131,7 @@ Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signe
 - RBI Key Fact Statement / APR and DPDP consent records
 - Real connectors: Account Aggregator (Sahamati FIUs), GST and commercial bureaus
 - Policy editing and side-by-side backtesting in the UI
-- Publish `@credflow/engine` to npm
+- Publish `@credrail/engine` to npm
 - API rate limiting and a TypeScript SDK
 
 ## Security

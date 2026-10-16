@@ -1,5 +1,5 @@
 {
-  "name": "credflow",
+  "name": "credrail",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,11 +7,11 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit && npm run typecheck -w @credflow/engine",
+    "typecheck": "tsc --noEmit && npm run typecheck -w @credrail/engine",
     "db:seed": "tsx seed.ts",
     "setup": "prisma migrate deploy && tsx seed.ts",
-    "test": "npm run test -w @credflow/engine && vitest run",
-    "build:engine": "npm run build -w @credflow/engine",
+    "test": "npm run test -w @credrail/engine && vitest run",
+    "build:engine": "npm run build -w @credrail/engine",
     "policy": "tsx scripts/policy.ts",
     "policy:sync-default": "tsx scripts/generate-default-policy.ts",
     "smoke": "tsx scripts/smoke-test.ts",
