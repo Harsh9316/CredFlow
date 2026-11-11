@@ -7,6 +7,8 @@
 
 <p align="center"><strong>Open-source, explainable credit underwriting for Indian NBFCs.</strong></p>
 
+<p align="center"><sub>Credrail was first released as CredFlow, which is why the repository keeps that name.</sub></p>
+
 Credrail takes an SME loan application through fraud pre-checks, an optional bureau overlay and a cash-flow-first credit score, then recommends approve / refer / reject with the reasons behind it. Analysts make the final call, and every step is written to an audit trail.
 
 > Credrail does not replace your credit policy, it runs it. Each NBFC's policy is a versioned YAML file covering thresholds, scorecard bands, LTV limits, industry risk, fraud rules and bureau modifiers, and every decision records the exact version it used.
@@ -22,6 +24,7 @@ Credrail takes an SME loan application through fraud pre-checks, an optional bur
 - **API-first.** A REST API with an OpenAPI 3.1 spec, scoped API keys, idempotent writes, signed webhooks and an event feed, so you can plug Credrail into your LOS, ERP or marketplace. See [docs/API.md](docs/API.md).
 - **Maker-checker.** Your policy decides which sanctions need a second approver (by amount, or whenever the system is overridden), and the checker must be a different user.
 - **Real data, with consent.** Account Aggregator bank statements and GST returns, plus GSTIN and PAN verification, through Setu. A bureau adapter works with any commercial bureau (CIBIL, CRIF, Experian, Equifax) through your own gateway. Bureau pulls require a recorded borrower consent, and only derived figures are stored. Mocks are included for development. See [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Advisory default-risk model.** An explainable probability-of-default model trained in Python on real loan data and scored inside the engine, reported next to the policy decision without changing it. See [below](#probability-of-default-model).
 - **Auditable.** Overrides need a reason, and every action (by a user or an API key) goes into an audit log that Postgres refuses to edit or delete.
 
 ## Quick start
@@ -106,6 +109,23 @@ const result = evaluateApplication(application, DEFAULT_POLICY)
 
 See [packages/engine](packages/engine) for details.
 
+## Probability-of-default model
+
+[`ml/`](ml/README.md) trains an explainable logistic-regression model that estimates how likely a borrower is to default, and exports it as JSON for the engine to score. It is **advisory**: `evaluation.defaultRisk` sits next to the policy decision, and approve / refer / reject is identical with or without it.
+
+| Model (UCI Taiwan credit default, 30,000 loans, CC BY 4.0) | AUC | KS | Brier |
+|---|---|---|---|
+| Logistic regression (exported to the engine) | 0.754 | 0.398 | 0.140 |
+| Gradient boosting (benchmark only) | 0.775 | 0.417 | 0.136 |
+
+- **Explainable:** each score comes with its top drivers, so an analyst can see why a borrower scored high.
+- **Calibrated:** predicted and actual default rates agree within about two points in every risk decile ([full report](ml/reports/uci-taiwan.md)).
+- **Fair by construction:** sex, marital status, age and education are never used as features.
+- **Exact in production:** a parity test checks that the TypeScript scorer reproduces the Python probabilities to nine decimal places.
+- **Optional explanations:** with `?explain=true`, Claude writes a short plain-English summary for the credit officer. Off by default; only the model output and the decision are sent, never borrower identifiers.
+
+Turn it on with `CREDRAIL_PD_MODEL="ml/models/uci-taiwan.json"` and send `riskFeatures` to `POST /api/v1/evaluate` ([API guide](docs/API.md#advisory-probability-of-default)). The bundled model shows the pipeline on public data; retrain it on your own book before relying on it.
+
 ## Development
 
 ```bash
@@ -115,13 +135,14 @@ npm run lint
 npm run db:migrate         # create a migration after changing prisma/schema.prisma
 npm run smoke              # end-to-end checks against a running instance (BASE_URL, default http://localhost:3000)
 npm run webhooks:dispatch  # send due webhook retries (run on a schedule in production)
+cd ml && python -m pytest -q tests   # ML pipeline tests (see ml/README.md for setup)
 ```
 
-CI runs all of these against Postgres on every pull request, plus a production build, a migration drift check and a Docker boot test.
+CI runs all of these against Postgres on every pull request, plus the ML pipeline tests, a production build, a migration drift check and a Docker boot test.
 
 ## Tech stack
 
-Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signed JWT sessions (`jose`) · bcrypt
+Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signed JWT sessions (`jose`) · bcrypt · Python and scikit-learn (`ml/`)
 
 ## Documentation
 
@@ -131,6 +152,7 @@ Next.js 16 (App Router) · TypeScript · Prisma · PostgreSQL 16 · Zod · signe
 - [Functional specification](docs/FUNCTIONAL.md)
 - [Technical documentation](docs/TECHNICAL.md)
 - [Underwriting engine explained](docs/UNDERWRITING_EXPLAINED.md)
+- [Probability-of-default model](ml/README.md) and its [evaluation report](ml/reports/uci-taiwan.md)
 
 ## Roadmap
 
