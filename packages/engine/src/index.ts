@@ -1,4 +1,13 @@
-export { evaluateApplication } from './evaluate'
+export { evaluateApplication, type EvaluateOptions } from './evaluate'
+export {
+  PdModelSchema,
+  parsePdModel,
+  scoreDefaultRisk,
+  type DefaultRiskDriver,
+  type DefaultRiskResult,
+  type PdModel,
+  type RiskFeatures,
+} from './pd'
 export { runFraudChecks } from './fraud'
 export { applyBureauOverlay } from './bureau'
 export { checkerRequirements, canActAsChecker } from './approvals'

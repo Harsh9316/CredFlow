@@ -1,0 +1,278 @@
+{
+  "schema": "credrail.pd-model/v1",
+  "id": "uci-taiwan-logreg",
+  "version": "2026-11-11",
+  "algorithm": "logistic-regression",
+  "advisoryOnly": true,
+  "dataset": {
+    "name": "uci-taiwan",
+    "title": "Default of credit card clients (Taiwan)",
+    "source": "https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients",
+    "license": "CC BY 4.0",
+    "excludedColumns": [
+      "ID",
+      "SEX",
+      "MARRIAGE",
+      "AGE",
+      "EDUCATION"
+    ]
+  },
+  "intercept": -1.4612202540031929,
+  "features": [
+    {
+      "name": "LIMIT_BAL",
+      "label": "Credit limit",
+      "source": {
+        "op": "raw",
+        "column": "LIMIT_BAL"
+      },
+      "kind": "numeric",
+      "clip": [
+        10000.0,
+        500000.0
+      ],
+      "mean": 166670.08333333334,
+      "std": 127280.10641229991,
+      "coef": -0.21580493022354413
+    },
+    {
+      "name": "PAY_0",
+      "label": "Repayment status, last month",
+      "source": {
+        "op": "raw",
+        "column": "PAY_0"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -1.024723442291125,
+        "-1": -0.32655635338133676,
+        "1": -0.02377239673876751,
+        "-2": -0.6831091960737251,
+        "2": 1.0888688141111542,
+        "3": 0.7053651459113435,
+        "4": 0.1263975626203815
+      },
+      "baseline": -0.5256346518593957
+    },
+    {
+      "name": "PAY_2",
+      "label": "Repayment status, 2 months ago",
+      "source": {
+        "op": "raw",
+        "column": "PAY_2"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -0.0556805984525648,
+        "-1": -0.10833598499490883,
+        "2": 0.05122738745349462,
+        "-2": -0.024172099868195948,
+        "3": 0.15706826761543083,
+        "4": -0.15154059464807393
+      },
+      "baseline": -0.04620900696300225
+    },
+    {
+      "name": "PAY_3",
+      "label": "Repayment status, 3 months ago",
+      "source": {
+        "op": "raw",
+        "column": "PAY_3"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -0.11030502913832475,
+        "-1": -0.20197135783093165,
+        "-2": -0.2096481166377644,
+        "2": 0.26081820424690555,
+        "3": 0.10319226330978053,
+        "4": -0.03216450433860204
+      },
+      "baseline": -0.092590682381966
+    },
+    {
+      "name": "PAY_4",
+      "label": "Repayment status, 4 months ago",
+      "source": {
+        "op": "raw",
+        "column": "PAY_4"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -0.11556000430955737,
+        "-1": -0.179465725910818,
+        "-2": -0.13183719971436703,
+        "2": 0.19048043670588918,
+        "3": 0.0638616677448114,
+        "4": 0.05201296215025936,
+        "7": 0.1135530379973785
+      },
+      "baseline": -0.09558357113337498
+    },
+    {
+      "name": "PAY_5",
+      "label": "Repayment status, 5 months ago",
+      "source": {
+        "op": "raw",
+        "column": "PAY_5"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -0.11349257144719292,
+        "-1": -0.11586849564651958,
+        "-2": -0.07128917745939282,
+        "2": 0.17969499200503553,
+        "3": -0.024305177555668692,
+        "4": -0.07890215901258586,
+        "7": 0.09814406531535685
+      },
+      "baseline": -0.08078038092877857
+    },
+    {
+      "name": "PAY_6",
+      "label": "Repayment status, 6 months ago",
+      "source": {
+        "op": "raw",
+        "column": "PAY_6"
+      },
+      "kind": "categorical",
+      "levels": {
+        "0": -0.3160942552260534,
+        "-1": -0.17719796770698673,
+        "-2": -0.0011058716382546226,
+        "2": 0.05483955616082978,
+        "3": 0.160818910833625,
+        "4": 0.05190558641669106,
+        "7": 0.06581113069995538
+      },
+      "baseline": -0.1990152203462589
+    },
+    {
+      "name": "BILL_AMT1",
+      "label": "Latest statement balance",
+      "source": {
+        "op": "raw",
+        "column": "BILL_AMT1"
+      },
+      "kind": "numeric",
+      "clip": [
+        -77.00999999999999,
+        348402.40999999916
+      ],
+      "mean": 50268.35195833333,
+      "std": 68969.77521425099,
+      "coef": 0.05735350750163731
+    },
+    {
+      "name": "PAY_AMT1",
+      "label": "Latest payment amount",
+      "source": {
+        "op": "raw",
+        "column": "PAY_AMT1"
+      },
+      "kind": "numeric",
+      "clip": [
+        0.0,
+        67572.31999999931
+      ],
+      "mean": 5037.123074999993,
+      "std": 9494.99507746058,
+      "coef": -0.21535523493341244
+    },
+    {
+      "name": "UTILIZATION_1",
+      "label": "Credit utilisation, latest statement",
+      "source": {
+        "op": "ratio",
+        "numerator": "BILL_AMT1",
+        "denominator": "LIMIT_BAL"
+      },
+      "kind": "numeric",
+      "clip": [
+        -0.0004842255639097744,
+        1.2335196130952288
+      ],
+      "mean": 0.4190409842635199,
+      "std": 0.3946179176112085,
+      "coef": 0.10131022915940907
+    },
+    {
+      "name": "PAYMENT_RATIO_1",
+      "label": "Share of statement 1 paid",
+      "source": {
+        "op": "ratio",
+        "numerator": "PAY_AMT1",
+        "denominator": "BILL_AMT1"
+      },
+      "kind": "numeric",
+      "clip": [
+        -0.03207079775940718,
+        16.1757644341801
+      ],
+      "mean": 0.6081516104244441,
+      "std": 2.0733338227630904,
+      "coef": 0.014873314076525344
+    },
+    {
+      "name": "PAYMENT_RATIO_2",
+      "label": "Share of statement 2 paid",
+      "source": {
+        "op": "ratio",
+        "numerator": "PAY_AMT2",
+        "denominator": "BILL_AMT2"
+      },
+      "kind": "numeric",
+      "clip": [
+        -1.972662721893491,
+        18.92881640020625
+      ],
+      "mean": 0.6359996945185605,
+      "std": 2.4050825231783053,
+      "coef": -0.06091465967870601
+    },
+    {
+      "name": "PAYMENT_RATIO_3",
+      "label": "Share of statement 3 paid",
+      "source": {
+        "op": "ratio",
+        "numerator": "PAY_AMT3",
+        "denominator": "BILL_AMT3"
+      },
+      "kind": "numeric",
+      "clip": [
+        -1.044651736883021,
+        17.412287125266303
+      ],
+      "mean": 0.5809489437003621,
+      "std": 2.1917091432106877,
+      "coef": -0.06592740196933657
+    }
+  ],
+  "bands": {
+    "medium": 0.1647,
+    "high": 0.3702
+  },
+  "metrics": {
+    "test": {
+      "n": 6000,
+      "defaultRate": 0.2212,
+      "auc": 0.7536,
+      "gini": 0.5072,
+      "ks": 0.3979,
+      "brier": 0.1399
+    },
+    "crossValidation": {
+      "C": 0.03,
+      "cvAucMean": 0.7681,
+      "cvAucStd": 0.0058
+    },
+    "benchmarkGradientBoosting": {
+      "n": 6000,
+      "defaultRate": 0.2212,
+      "auc": 0.7752,
+      "gini": 0.5503,
+      "ks": 0.4171,
+      "brier": 0.1361
+    }
+  }
+}
