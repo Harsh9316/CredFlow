@@ -1,4 +1,5 @@
 import type { CollateralType, RiskBand, Severity } from './policy'
+import type { DefaultRiskResult, RiskFeatures } from './pd'
 
 export type MonthlyFlow = { month: string; inflow: number; outflow: number }
 
@@ -44,6 +45,8 @@ export type ApplicationInput = {
     /** 0-1 similarity between the name on the PAN and the business's legal name. */
     panNameMatch?: number
   } | null
+  /** Raw inputs for an optional probability-of-default model, keyed by the model's source columns. */
+  riskFeatures?: RiskFeatures | null
 }
 
 export type Decision = 'APPROVE' | 'REFER' | 'REJECT'
@@ -98,4 +101,6 @@ export type Evaluation = {
   fraud: FraudCheckResult
   bureau: BureauOverlayResult
   policy: { id: string; version: string }
+  /** Advisory model output. Present only when a PD model and riskFeatures were supplied; never affects `decision`. */
+  defaultRisk?: DefaultRiskResult
 }

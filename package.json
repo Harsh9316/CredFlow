@@ -22,6 +22,7 @@
     "brand:build": "node scripts/build-brand.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "jose": "^5.10.0",

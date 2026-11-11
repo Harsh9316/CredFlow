@@ -44,6 +44,7 @@ export const ApplicationInputSchema = z.object({
       panNameMatch: z.number().min(0).max(1).optional(),
     })
     .nullish(),
+  riskFeatures: z.record(z.string(), z.union([z.number(), z.string()]).nullish()).nullish(),
 }) satisfies z.ZodType<ApplicationInput>
 
 export function parseApplicationInput(input: unknown): ApplicationInput {

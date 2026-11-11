@@ -1,6 +1,7 @@
 // Runs the full underwriting pipeline for one application:
 //   1. fraud pre-checks  2. bureau overlay  3. credit score  4. loan sizing  5. explanations
-// Pure and deterministic: same input + same policy => same output.
+// Pure and deterministic: same input + same policy (+ same PD model) => same output.
+// The optional PD model is advisory: it adds `defaultRisk` and never changes the decision.
 
 import type { CreditPolicy } from './policy'
 import type { ApplicationInput, Decision, Evaluation } from './types'
@@ -14,8 +15,14 @@ import {
   monthlyEMI,
 } from './scoring'
 import { lakh } from './format'
+import { scoreDefaultRisk, type PdModel } from './pd'
 
-export function evaluateApplication(input: ApplicationInput, policy: CreditPolicy): Evaluation {
+export type EvaluateOptions = {
+  /** Advisory probability-of-default model (see ml/). Used only when the input has riskFeatures. */
+  pdModel?: PdModel | null
+}
+
+export function evaluateApplication(input: ApplicationInput, policy: CreditPolicy, options: EvaluateOptions = {}): Evaluation {
   const fraud = runFraudChecks(input, policy)
   const bureau = applyBureauOverlay(input.bureau, policy)
 
@@ -116,7 +123,7 @@ export function evaluateApplication(input: ApplicationInput, policy: CreditPolic
   }
   recommendations.push(...bureau.notes)
 
-  return {
+  const evaluation: Evaluation = {
     decision,
     creditScore,
     scoreBreakdown,
@@ -133,4 +140,8 @@ export function evaluateApplication(input: ApplicationInput, policy: CreditPolic
     bureau,
     policy: { id: policy.id, version: policy.version },
   }
+  if (options.pdModel && input.riskFeatures) {
+    evaluation.defaultRisk = scoreDefaultRisk(options.pdModel, input.riskFeatures)
+  }
+  return evaluation
 }

@@ -97,6 +97,12 @@ The response includes the full evaluation: decision, score breakdown, recommende
 
 `POST /evaluate` runs the engine on the posted data under your active policy and returns the result **without storing anything**. Use it to pre-screen leads, or to run Credrail's decisioning inside your own system of record.
 
+#### Advisory probability of default
+
+If the server sets `CREDRAIL_PD_MODEL` (a model trained with [`ml/`](../ml/README.md)), add `riskFeatures` to the body, keyed by the model's source columns, and the response carries `evaluation.defaultRisk`: a probability, a LOW / MEDIUM / HIGH band, the top drivers and any inputs that were missing. It is advisory: `decision`, scores and amounts are identical with or without it.
+
+Add `?explain=true` to also get `defaultRiskExplanation`, a short plain-English summary written by Claude. It is off unless the server sets `CREDRAIL_LLM_EXPLANATIONS="true"` and `ANTHROPIC_API_KEY`. Only the model output and the decision are sent, never borrower identifiers.
+
 ## Idempotency
 
 Send an `Idempotency-Key` header on `POST /applications`:

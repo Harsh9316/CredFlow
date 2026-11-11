@@ -48,3 +48,9 @@ next-env.d.ts
 
 # engine build output
 packages/*/dist
+
+# ml/ (Python): downloaded data, virtualenvs, caches
+/ml/data/
+/ml/.venv/
+__pycache__/
+.pytest_cache/

@@ -169,9 +169,10 @@ export function buildOpenApiDocument(serverUrl: string) {
           tags: ['Decisioning'],
           operationId: 'evaluate',
           summary: 'Evaluate without storing',
-          description: 'Scope: `evaluate`. Evaluates the posted application under your active credit policy and returns the full result. Nothing is stored and no events are emitted.',
+          description: 'Scope: `evaluate`. Evaluates the posted application under your active credit policy and returns the full result. Nothing is stored and no events are emitted. When the server has a probability-of-default model configured (`CREDRAIL_PD_MODEL`) and the body includes `riskFeatures`, `evaluation.defaultRisk` carries an advisory score that never changes the decision.',
+          parameters: [{ name: 'explain', in: 'query', required: false, schema: { type: 'boolean' }, description: 'Add a plain-English `defaultRiskExplanation` written by Claude. Only when the server enables it (`CREDRAIL_LLM_EXPLANATIONS`); null if unavailable.' }],
           requestBody: { required: true, content: json(ref('ApplicationInput')) },
-          responses: { 200: { description: 'OK', content: json({ type: 'object', properties: { evaluation: ref('Evaluation'), policy: ref('PolicyRef') } }) }, ...errorResponses },
+          responses: { 200: { description: 'OK', content: json({ type: 'object', properties: { evaluation: ref('Evaluation'), defaultRiskExplanation: nullable(ref('DefaultRiskExplanation')), policy: ref('PolicyRef') } }) }, ...errorResponses },
         },
       },
       '/policy': {
@@ -269,7 +270,24 @@ export function buildOpenApiDocument(serverUrl: string) {
             },
             bureau: { type: 'object', properties: { available: { type: 'boolean' }, bureauScore: num, bureauRank: { type: 'integer', minimum: 1, description: '1 = lowest risk' }, modifier: num, notes: strings } },
             policy: { type: 'object', properties: { id: str, version: str } },
+            defaultRisk: ref('DefaultRisk'),
           },
+        },
+        DefaultRisk: {
+          type: 'object',
+          description: 'Advisory probability of default from a model trained in ml/. Never affects `decision`.',
+          properties: {
+            advisory: { type: 'boolean', enum: [true] },
+            probability: num,
+            band: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+            drivers: { type: 'array', items: { type: 'object', properties: { feature: str, label: str, contribution: num, direction: { type: 'string', enum: ['RAISES_RISK', 'LOWERS_RISK'] }, value: {} } } },
+            missing: strings,
+            model: { type: 'object', properties: { id: str, version: str, dataset: str, auc: num } },
+          },
+        },
+        DefaultRiskExplanation: {
+          type: 'object',
+          properties: { summary: str, keyFactors: strings, suggestedChecks: strings, model: str },
         },
         Application: {
           type: 'object',
